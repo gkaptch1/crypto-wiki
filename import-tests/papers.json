@@ -1,0 +1,40 @@
+{
+  "comment": "Starting set of the PLAN.md candidate import corpus (arXiv-source papers only; the ePrint-only PDFs belong to the later PDF/LLM stage). `definitions` is the exact count of \\begin{definition} environments, grep-verified against the source; other definition-like envs (construction, experiment, ...) are extracted too but not pinned. `macrosAtLeast` is a lower bound on unique macro names (papers redeclare; last definition wins).",
+  "papers": [
+    {
+      "arxiv": "2402.09370",
+      "title": "Pseudorandom Error-Correcting Codes (Christ–Gunn; dual-hosted as ePrint 2024/235)",
+      "expect": { "definitions": 18, "macrosAtLeast": 130, "procedures": 0 }
+    },
+    {
+      "arxiv": "2003.00578",
+      "title": "Quantum Indistinguishability for PKE (Gagliardoni–Krämer–Struck; cryptocode game boxes)",
+      "note": "source has 11 \\procedure calls; one sits inside a definition candidate, so 10 standalone (dedup by design)",
+      "expect": { "definitions": 15, "macrosAtLeast": 220, "procedures": 10 }
+    },
+    {
+      "arxiv": "2512.20583",
+      "title": "Making Sense of Private Advertising (Hogan–Chator–Kaptchuk–Varia–Devadas)",
+      "note": "one definition is nested inside another (utilityandlowerbound.tex:74/90); both are emitted",
+      "expect": { "definitions": 10, "macrosAtLeast": 40 }
+    },
+    {
+      "arxiv": "1504.05255",
+      "title": "Semantic Security and Indistinguishability in the Quantum World (CRYPTO 2016)",
+      "expect": { "definitions": 22, "macrosAtLeast": 60 }
+    },
+    {
+      "arxiv": "2210.05138",
+      "title": "Commitments to Quantum States (Gunn–Ju–Ma–Zhandry; minimal preamble)",
+      "note": "ships an unused template.tex with its own \\documentclass — mainFile pins the real root",
+      "mainFile": "0-main.tex",
+      "expect": { "definitions": 27, "macrosAtLeast": 10 }
+    },
+    {
+      "arxiv": "2008.09317",
+      "title": "iO from Well-Founded Assumptions (Jain–Lin–Sahai; 600+ macros, mostly in shipped .sty files)",
+      "note": "a naive grep finds 20 \\begin{definition}, but 3 in FE-NC0.tex are commented out — 17 is correct",
+      "expect": { "definitions": 17, "macrosAtLeast": 600 }
+    }
+  ]
+}

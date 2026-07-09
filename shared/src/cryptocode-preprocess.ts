@@ -21,7 +21,7 @@
 // scanning utilities (brace- and environment-aware)
 
 /** Index of the '}' matching the '{' at `open`, or -1. */
-function matchBrace(src: string, open: number): number {
+export function matchBrace(src: string, open: number): number {
   let depth = 0;
   for (let i = open; i < src.length; i++) {
     const c = src[i];
@@ -38,7 +38,7 @@ function matchBrace(src: string, open: number): number {
 }
 
 /** Index of the ']' matching the '[' at `open` (brace-aware), or -1. */
-function matchBracket(src: string, open: number): number {
+export function matchBracket(src: string, open: number): number {
   let braces = 0;
   for (let i = open; i < src.length; i++) {
     const c = src[i];

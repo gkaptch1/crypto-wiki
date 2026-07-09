@@ -20,6 +20,10 @@ spike/out/
 # regression-harness outputs (regenerate with npm run render-tests)
 render-tests/out/
 
+# import-corpus downloads + outputs (node import-tests/fetch.mjs / npm run import-tests)
+import-tests/corpus/
+import-tests/out/
+
 # misc
 .DS_Store
 .vscode/

@@ -4,17 +4,22 @@ Wiki of formal cryptographic definitions that render exactly as in papers, with
 citable permalinks and per-viewer notation via macro sets. **PLAN.md is the source
 of truth** for architecture decisions and phased roadmap — read it before making
 design choices. Phases 0–2 done (revive + spike; core wiki loop incl. shim v1 +
-regression harness; accounts & invited write via better-auth). Phase 3
-(production rendering + deploy polish) is next. Google/GitHub OAuth app
-credentials are NOT yet created — dev uses the password fallback below.
+regression harness; accounts & invited write via better-auth). Phases re-ordered
+2026-07-09: **Phase 3 is now paper import** (deterministic LaTeX extractor →
+macro set + draft formulations; test corpus in PLAN.md); production rendering +
+deploy polish moved to Phase 4 (blocked on university VM / OAuth creds / Docker
+anyway). Google/GitHub OAuth app credentials are NOT yet created — dev uses the
+password fallback below.
 
 ## Layout & stack (npm workspaces monorepo — run `npm install` at the ROOT)
 - `shared/` — `@crypto-wiki/shared`: TypeBox schemas + types + permalink-ref parsing,
   plus the whole Tier-1 renderer: cryptocode macro table, the shim-v1 preprocessing
   pass (`cryptocode-preprocess.ts`), and the block/fragment renderer
   (`latex-render.ts`; frontend injects KaTeX, styles its `cc-*` classes in
-  `index.css`). **Build it after editing** (`npm run build -w @crypto-wiki/shared`)
-  — backend/frontend consume `dist/`.
+  `index.css`); plus the deterministic paper importer (`latex-import.ts`:
+  `extractFromLatex` — macros + definition-like envs + game boxes out of paper
+  sources; unit tests in `shared/test/`, vitest). **Build it after editing**
+  (`npm run build -w @crypto-wiki/shared`) — backend/frontend consume `dist/`.
 - `backend/` — Fastify + Prisma 7 + PostgreSQL + better-auth. App in `src/app.ts`
   (buildApp, used by tests), routes in `src/routes/` (permalinks / definitions /
   macro-sets / auth / invitations / me), better-auth config + role-assignment hook
@@ -29,11 +34,17 @@ credentials are NOT yet created — dev uses the password fallback below.
   render, writes `out/report.html` side by side. Teach the shim nothing without
   adding a fragment; the seeded IND-CPA left-or-right body must stay in sync
   with its fragment.
+- `import-tests/` — paper-importer corpus harness: `node import-tests/fetch.mjs`
+  downloads the PLAN.md starting-six arXiv sources into gitignored `corpus/`,
+  `npm run import-tests` runs `extractFromLatex` over them against the
+  grep-verified expectations in `papers.json` (results in `out/<id>.json`;
+  papers not downloaded are skipped).
 
 ## Commands
 - Backend (`-w @crypto-wiki/backend` from root, or cd backend): `npm run dev`
   (port 3000), `npm run db:seed`, `npx prisma migrate deploy`, `npm test`
   (vitest; auto-creates + migrates the `cryptowiki_test` DB), `npm run typecheck`.
+- Root `npm test` runs shared (importer unit tests) then backend suites.
 - Frontend: `npm run dev` (port 5173), `npm run build` (tsc + vite)
 - Needs Postgres on 5432; `backend/.env` sets `DATABASE_URL`,
   `frontend/.env` sets `VITE_BACKEND_URL` (must be `VITE_`-prefixed to reach Vite).

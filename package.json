@@ -8,8 +8,9 @@
   ],
   "scripts": {
     "build": "npm run build -w @crypto-wiki/shared && npm run build -w @crypto-wiki/backend && npm run build -w @crypto-wiki/frontend",
-    "test": "npm run test -w @crypto-wiki/backend",
+    "test": "npm run test -w @crypto-wiki/shared && npm run test -w @crypto-wiki/backend",
     "render-tests": "npm run build -w @crypto-wiki/shared && node render-tests/run.mjs",
+    "import-tests": "npm run build -w @crypto-wiki/shared && node import-tests/run.mjs",
     "dev:backend": "npm run dev -w @crypto-wiki/backend",
     "dev:frontend": "npm run dev -w @crypto-wiki/frontend"
   },
