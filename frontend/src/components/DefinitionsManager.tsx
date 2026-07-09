@@ -1,25 +1,29 @@
 import { useEffect, useState } from 'react';
-import type { Definition } from '../types/definition';
+import type { ConcreteDefinition } from '../types/definition';
 import DefinitionCard from './DefinitionCard';
 import MarkdownRenderer from './MarkdownRenderer';
+import { createDefinition, getDefaultDefinitions } from '../api/definitions';
 
+// Phase 0: create-only editor. Editing/deleting existing definitions comes with
+// the Phase 1 editor rebuild (the backend endpoints don't exist yet).
 function DefinitionsManager() {
   const [title, setTitle] = useState<string>('');
   const [category, setCategory] = useState<string>('');
   const [input, setInput] = useState<string>('');
-  const [savedDefs, setSavedDefs] = useState<Definition[]>([]);
-  const [editingDef, setEditingDef] = useState<Definition | null>(null);
+  const [savedDefs, setSavedDefs] = useState<ConcreteDefinition[]>([]);
   const [macros, setMacros] = useState<Record<string, string>>({});
   const [macroKey, setMacroKey] = useState<string>('');
   const [macroValue, setMacroValue] = useState<string>('');
+  const [error, setError] = useState<string | null>(null);
+
+  const reload = () => {
+    getDefaultDefinitions()
+      .then(setSavedDefs)
+      .catch((e) => setError(e.message));
+  };
 
   // fetch definitions from backend on component mount
-  useEffect(() => {
-    fetch('http://localhost:3000/definitions')
-      .then((res) => res.json())
-      .then((data) => setSavedDefs(data.data))
-      .catch((error) => console.error('Failed to fetch definitions', error));
-  }, []);
+  useEffect(reload, []);
 
   // Add or update a macro
   const handleAddMacro = () => {
@@ -44,86 +48,22 @@ function DefinitionsManager() {
 
   // save new definition
   const saveDef = async () => {
+    setError(null);
     try {
-      const response = await fetch('http://localhost:3000/definitions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, category, bodyLatex: input }),
+      await createDefinition({
+        title,
+        categories: category.trim() ? [category.trim()] : [],
+        bodyLatex: input,
+        macros,
       });
-
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
-      }
 
       setTitle('');
       setCategory('');
       setInput('');
       setMacros({});
-
-      // reload after save
-      const updated = await fetch('http://localhost:3000/definitions').then((res) => res.json());
-      setSavedDefs(updated);
-    } catch (error) {
-      console.error('Failed to save definition', error);
-    }
-  };
-
-  const handleEdit = (def: Definition) => {
-    setTitle(def.title);
-    setInput(def.bodyLatex);
-    setCategory(def.category || ' ');
-    setEditingDef(def);
-  };
-
-  const handleUpdate = async () => {
-    if (!editingDef) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`http://localhost:3000/definitions/${editingDef.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          title,
-          category,
-          bodyLatex: input,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
-      }
-
-      const updatedDef = await response.json();
-
-      // Update definition currently being edited
-      setSavedDefs((prevDefs) =>
-        prevDefs.map((def) => (def.id === editingDef.id ? updatedDef : def))
-      );
-
-      // clear input forms
-      setTitle('');
-      setCategory('');
-      setInput('');
-      setMacros({});
-      setEditingDef(null);
-    } catch (error) {
-      console.error('Failed to update definition', error);
-    }
-  };
-
-  const handleDelete = async (id: number) => {
-    try {
-      const response = await fetch(`http://localhost:3000/definitions/${id}`, {
-        method: 'DELETE',
-      });
-
-      if (!response.ok) {
-        throw new Error(`Server responded with ${response.status}`);
-      }
-    } catch (error) {
-      console.error('Failed to delete definition', error);
+      reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to save definition');
     }
   };
 
@@ -194,11 +134,12 @@ function DefinitionsManager() {
         />
 
         <button
-          onClick={editingDef ? handleUpdate : saveDef}
+          onClick={saveDef}
           className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-700 active:bg-blue-800 mt-2"
         >
           Save Definition
         </button>
+        {error && <p className="text-red-600 mt-2">{error}</p>}
       </div>
 
       <div className="mt-4">
@@ -206,10 +147,9 @@ function DefinitionsManager() {
         <MarkdownRenderer content={input} macros={macros}></MarkdownRenderer>
       </div>
 
-      {savedDefs &&
-        savedDefs.map((def, index) => (
-          <DefinitionCard index={index} def={def} onEdit={handleEdit} onDelete={handleDelete} />
-        ))}
+      {savedDefs.map((def) => (
+        <DefinitionCard key={def.title} def={def} />
+      ))}
     </div>
   );
 }

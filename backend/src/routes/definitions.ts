@@ -2,6 +2,15 @@ import { FastifyInstance } from 'fastify';
 import { prisma } from '../../lib/prisma';
 import { UUID } from 'node:crypto';
 
+// Prisma 7 driver adapters report the violated unique-constraint fields under
+// meta.driverAdapterError, not meta.target like the classic engine did
+function p2002Fields(err: any): string[] {
+  const fields =
+    err.meta?.driverAdapterError?.cause?.constraint?.fields ?? err.meta?.target ?? [];
+  const list = Array.isArray(fields) ? fields : [fields];
+  return list.map((f: unknown) => String(f).replace(/"/g, ''));
+}
+
 export async function definitionRoutes(fastify: FastifyInstance) {
   // get all default versions of definitions
   fastify.get('/definitions', async () => {
@@ -68,7 +77,9 @@ export async function definitionRoutes(fastify: FastifyInstance) {
 
     if (!definitionVersion) {
       return reply.code(404).send({
-        error: `No default version found for definition ${slug}`,
+        error: versionSlug
+          ? `Version "${versionSlug}" not found for definition ${slug}`
+          : `No default version found for definition ${slug}`,
       });
     }
 
@@ -161,7 +172,7 @@ export async function definitionRoutes(fastify: FastifyInstance) {
       return newDef;
     } catch (err: any) {
       // handle prisma unique constraint errors (race condition)
-      if (err.code === 'P2002' && err.meta?.target?.includes('title')) {
+      if (err.code === 'P2002' && p2002Fields(err).includes('title')) {
         return reply.code(409).send({
           error: `Definition with title "${title}" already exists.`,
         });
@@ -203,8 +214,13 @@ export async function definitionRoutes(fastify: FastifyInstance) {
       });
     }
 
-    // this new version comes last, so its order is the length of the array
-    const newOrder = existing.versions.length;
+    // this new version comes last; use max(order) + 1 rather than array length,
+    // which produces duplicate orders once any version has been deleted
+    const maxOrder = await prisma.definitionVersion.aggregate({
+      where: { definitionId: existing.id },
+      _max: { order: true },
+    });
+    const newOrder = (maxOrder._max.order ?? -1) + 1;
 
     const baseVersionData = {
       slug,
@@ -230,17 +246,24 @@ export async function definitionRoutes(fastify: FastifyInstance) {
       : baseVersionData;
 
     try {
-      await prisma.definitionVersion.create({
+      const newVersion = await prisma.definitionVersion.create({
         data: newVersionData,
         include: {
           defaultMacroSet: true,
         },
       });
+      return reply.code(201).send(newVersion);
     } catch (err: any) {
       // handle prisma unique constraint errors (race condition)
-      if (err.code === 'P2002' && err.meta?.target?.includes('title')) {
+      // the uniques on DefinitionVersion are [definitionId, slug] and [definitionId, order]
+      if (err.code === 'P2002' && p2002Fields(err).includes('slug')) {
         return reply.code(409).send({
-          error: `Definition with title "${title}" already exists.`,
+          error: `Version "${slug}" already exists for definition "${title}".`,
+        });
+      }
+      if (err.code === 'P2002' && p2002Fields(err).includes('order')) {
+        return reply.code(409).send({
+          error: `Concurrent version creation for "${title}", please retry.`,
         });
       }
 

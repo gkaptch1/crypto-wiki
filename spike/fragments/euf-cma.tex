@@ -1,0 +1,17 @@
+\textbf{Definition (EUF-CMA Security).}
+A signature scheme $\Sigma = (\mathsf{KGen}, \mathsf{Sign}, \mathsf{Vrfy})$ is
+\emph{existentially unforgeable under adaptive chosen-message attack} if for
+every PPT adversary $\adv$,
+\[
+\Pr\left[ \mathsf{SigForge}_{\adv,\Sigma}(\secpar) = 1 \right] \le \negl(\secpar),
+\]
+where the experiment $\mathsf{SigForge}$ is defined as:
+
+\medskip
+\begin{center}
+\procedure{$\mathsf{SigForge}_{\adv,\Sigma}(\secpar)$}{
+  (vk, sk) \sample \mathsf{KGen}(1^\secpar) \\
+  (m^*, \sigma^*) \sample \adv^{\mathsf{Sign}(sk, \cdot)}(vk) \\
+  \pcreturn \mathsf{Vrfy}(vk, m^*, \sigma^*) = 1 \land m^* \notin \mathcal{Q}
+}
+\end{center}

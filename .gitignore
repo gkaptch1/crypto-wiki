@@ -11,6 +11,9 @@ frontend/*.log
 frontend/dist/
 frontend/build/
 
+# spike build outputs (regenerate with spike/build.sh)
+spike/out/
+
 # misc
 .DS_Store
 .vscode/

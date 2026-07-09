@@ -1,0 +1,9 @@
+\textbf{Definition (Pseudorandom Function).}
+Let $F : \{0,1\}^\secpar \times \{0,1\}^n \to \{0,1\}^m$ be an efficiently
+computable keyed function. $F$ is a \emph{pseudorandom function} if for every
+PPT distinguisher $\adv$ there exists a negligible function $\negl$ such that
+\[
+\left| \Pr_{k \sample \{0,1\}^\secpar}\left[ \adv^{F_k(\cdot)}(1^\secpar) = 1 \right]
+- \Pr_{f \sample \Funcs[n,m]}\left[ \adv^{f(\cdot)}(1^\secpar) = 1 \right] \right|
+\le \negl(\secpar).
+\]
