@@ -144,15 +144,24 @@ Markdown-as-definition-body (see body format above).
       errors; macro-set CRUD + pin + fork; 32 vitest tests against `cryptowiki_test`.
 - [x] Shared types package: npm workspaces monorepo, `@crypto-wiki/shared` holds
       TypeBox schemas + `Static<>` types + permalink ref parsing.
-- [ ] **katex-cryptocode shim v0**: macro table (notation + `pc*` keywords + basic
-      `\procedure`) shipped as the site's base macro layer; v1 adds the JS
-      preprocessing pass (optional args, line numbers, alignment tabs, `\pchstack`).
-      Regression-check both against real-LaTeX SVGs using the spike pipeline.
-- [ ] Frontend rebuild on the existing skeleton, actually using React Query:
-  - Wiki browse/search + category browse.
-  - Definition page: formulation tabs, revision history, macro-set switcher.
-  - Editor: create/edit definitions and formulations, KaTeX live preview, draft/publish.
-  - Macro-set manager: CRUD, duplicate/fork.
+- [x] **katex-cryptocode shim v0** (2026-07-09): 68-macro table
+      (`shared/src/cryptocode-macros.ts`— notation, `\adv`–`\zdv`, `pc*` keywords,
+      basic `\procedure`) as the site's base macro layer, merged under the viewer's
+      macro set; plus a minimal LaTeX-fragment renderer (`frontend/src/lib/latex.ts`:
+      paragraphs, `$…$`, `\[…\]`, center blocks, itemize, `\textbf`/`\emph`).
+      Verified in-browser: the seeded cryptocode EUF-CMA game box renders.
+- [ ] **shim v1**: JS preprocessing pass (optional args `\procedure[…]`, `\pcln`
+      line numbers, alignment tabs, `\pchstack`, `\gamechange`) and the regression
+      harness comparing shim renders against real-LaTeX SVGs via the spike pipeline.
+- [x] Frontend rebuild (2026-07-09), on React Query throughout:
+  - Wiki browse/search + category filter chips.
+  - Definition page (`/def/...` permalinks as specced): formulation tabs, revision
+    history dropdown + pinned-revision banner, macro-set switcher, citation line,
+    "copy citable permalink" (pins revision + macro snapshot via POST /pin).
+  - Editor: definition metadata, formulations (citation, default macro set, make
+    default), draft/publish revision lifecycle, KaTeX live preview.
+  - Macro-set manager: CRUD, fork, pin (shows citable ref), visibility selector,
+    open-by-UUID for unlisted/anonymous sets.
 
 ### Phase 2 — Accounts & invited write
 - [ ] better-auth with Google + GitHub, cookie sessions.

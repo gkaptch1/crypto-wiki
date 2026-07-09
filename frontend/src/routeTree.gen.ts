@@ -13,10 +13,10 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as WikiIndexRouteImport } from './routes/wiki/index'
 import { Route as MacrosIndexRouteImport } from './routes/macros/index'
 import { Route as EditorIndexRouteImport } from './routes/editor/index'
-import { Route as AccountIndexRouteImport } from './routes/account/index'
-import { Route as WikiDefIdRouteImport } from './routes/wiki/$defId'
-import { Route as MacrosSlugRouteImport } from './routes/macros/$slug'
-import { Route as EditorDefIdRouteImport } from './routes/editor/$defId'
+import { Route as MacrosUuidRouteImport } from './routes/macros/$uuid'
+import { Route as EditorDefSlugRouteImport } from './routes/editor/$defSlug'
+import { Route as DefDefSlugRouteImport } from './routes/def.$defSlug'
+import { Route as DefDefSlugFormulationRefRouteImport } from './routes/def.$defSlug_.$formulationRef'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -38,100 +38,101 @@ const EditorIndexRoute = EditorIndexRouteImport.update({
   path: '/editor/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const AccountIndexRoute = AccountIndexRouteImport.update({
-  id: '/account/',
-  path: '/account/',
+const MacrosUuidRoute = MacrosUuidRouteImport.update({
+  id: '/macros/$uuid',
+  path: '/macros/$uuid',
   getParentRoute: () => rootRouteImport,
 } as any)
-const WikiDefIdRoute = WikiDefIdRouteImport.update({
-  id: '/wiki/$defId',
-  path: '/wiki/$defId',
+const EditorDefSlugRoute = EditorDefSlugRouteImport.update({
+  id: '/editor/$defSlug',
+  path: '/editor/$defSlug',
   getParentRoute: () => rootRouteImport,
 } as any)
-const MacrosSlugRoute = MacrosSlugRouteImport.update({
-  id: '/macros/$slug',
-  path: '/macros/$slug',
+const DefDefSlugRoute = DefDefSlugRouteImport.update({
+  id: '/def/$defSlug',
+  path: '/def/$defSlug',
   getParentRoute: () => rootRouteImport,
 } as any)
-const EditorDefIdRoute = EditorDefIdRouteImport.update({
-  id: '/editor/$defId',
-  path: '/editor/$defId',
-  getParentRoute: () => rootRouteImport,
-} as any)
+const DefDefSlugFormulationRefRoute =
+  DefDefSlugFormulationRefRouteImport.update({
+    id: '/def/$defSlug_/$formulationRef',
+    path: '/def/$defSlug/$formulationRef',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/editor/$defId': typeof EditorDefIdRoute
-  '/macros/$slug': typeof MacrosSlugRoute
-  '/wiki/$defId': typeof WikiDefIdRoute
-  '/account': typeof AccountIndexRoute
-  '/editor': typeof EditorIndexRoute
-  '/macros': typeof MacrosIndexRoute
-  '/wiki': typeof WikiIndexRoute
+  '/def/$defSlug': typeof DefDefSlugRoute
+  '/editor/$defSlug': typeof EditorDefSlugRoute
+  '/macros/$uuid': typeof MacrosUuidRoute
+  '/editor/': typeof EditorIndexRoute
+  '/macros/': typeof MacrosIndexRoute
+  '/wiki/': typeof WikiIndexRoute
+  '/def/$defSlug/$formulationRef': typeof DefDefSlugFormulationRefRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/editor/$defId': typeof EditorDefIdRoute
-  '/macros/$slug': typeof MacrosSlugRoute
-  '/wiki/$defId': typeof WikiDefIdRoute
-  '/account': typeof AccountIndexRoute
+  '/def/$defSlug': typeof DefDefSlugRoute
+  '/editor/$defSlug': typeof EditorDefSlugRoute
+  '/macros/$uuid': typeof MacrosUuidRoute
   '/editor': typeof EditorIndexRoute
   '/macros': typeof MacrosIndexRoute
   '/wiki': typeof WikiIndexRoute
+  '/def/$defSlug/$formulationRef': typeof DefDefSlugFormulationRefRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/editor/$defId': typeof EditorDefIdRoute
-  '/macros/$slug': typeof MacrosSlugRoute
-  '/wiki/$defId': typeof WikiDefIdRoute
-  '/account/': typeof AccountIndexRoute
+  '/def/$defSlug': typeof DefDefSlugRoute
+  '/editor/$defSlug': typeof EditorDefSlugRoute
+  '/macros/$uuid': typeof MacrosUuidRoute
   '/editor/': typeof EditorIndexRoute
   '/macros/': typeof MacrosIndexRoute
   '/wiki/': typeof WikiIndexRoute
+  '/def/$defSlug_/$formulationRef': typeof DefDefSlugFormulationRefRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
-    | '/editor/$defId'
-    | '/macros/$slug'
-    | '/wiki/$defId'
-    | '/account'
-    | '/editor'
-    | '/macros'
-    | '/wiki'
-  fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/editor/$defId'
-    | '/macros/$slug'
-    | '/wiki/$defId'
-    | '/account'
-    | '/editor'
-    | '/macros'
-    | '/wiki'
-  id:
-    | '__root__'
-    | '/'
-    | '/editor/$defId'
-    | '/macros/$slug'
-    | '/wiki/$defId'
-    | '/account/'
+    | '/def/$defSlug'
+    | '/editor/$defSlug'
+    | '/macros/$uuid'
     | '/editor/'
     | '/macros/'
     | '/wiki/'
+    | '/def/$defSlug/$formulationRef'
+  fileRoutesByTo: FileRoutesByTo
+  to:
+    | '/'
+    | '/def/$defSlug'
+    | '/editor/$defSlug'
+    | '/macros/$uuid'
+    | '/editor'
+    | '/macros'
+    | '/wiki'
+    | '/def/$defSlug/$formulationRef'
+  id:
+    | '__root__'
+    | '/'
+    | '/def/$defSlug'
+    | '/editor/$defSlug'
+    | '/macros/$uuid'
+    | '/editor/'
+    | '/macros/'
+    | '/wiki/'
+    | '/def/$defSlug_/$formulationRef'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  EditorDefIdRoute: typeof EditorDefIdRoute
-  MacrosSlugRoute: typeof MacrosSlugRoute
-  WikiDefIdRoute: typeof WikiDefIdRoute
-  AccountIndexRoute: typeof AccountIndexRoute
+  DefDefSlugRoute: typeof DefDefSlugRoute
+  EditorDefSlugRoute: typeof EditorDefSlugRoute
+  MacrosUuidRoute: typeof MacrosUuidRoute
   EditorIndexRoute: typeof EditorIndexRoute
   MacrosIndexRoute: typeof MacrosIndexRoute
   WikiIndexRoute: typeof WikiIndexRoute
+  DefDefSlugFormulationRefRoute: typeof DefDefSlugFormulationRefRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -146,50 +147,50 @@ declare module '@tanstack/react-router' {
     '/wiki/': {
       id: '/wiki/'
       path: '/wiki'
-      fullPath: '/wiki'
+      fullPath: '/wiki/'
       preLoaderRoute: typeof WikiIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/macros/': {
       id: '/macros/'
       path: '/macros'
-      fullPath: '/macros'
+      fullPath: '/macros/'
       preLoaderRoute: typeof MacrosIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/editor/': {
       id: '/editor/'
       path: '/editor'
-      fullPath: '/editor'
+      fullPath: '/editor/'
       preLoaderRoute: typeof EditorIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/account/': {
-      id: '/account/'
-      path: '/account'
-      fullPath: '/account'
-      preLoaderRoute: typeof AccountIndexRouteImport
+    '/macros/$uuid': {
+      id: '/macros/$uuid'
+      path: '/macros/$uuid'
+      fullPath: '/macros/$uuid'
+      preLoaderRoute: typeof MacrosUuidRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/wiki/$defId': {
-      id: '/wiki/$defId'
-      path: '/wiki/$defId'
-      fullPath: '/wiki/$defId'
-      preLoaderRoute: typeof WikiDefIdRouteImport
+    '/editor/$defSlug': {
+      id: '/editor/$defSlug'
+      path: '/editor/$defSlug'
+      fullPath: '/editor/$defSlug'
+      preLoaderRoute: typeof EditorDefSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/macros/$slug': {
-      id: '/macros/$slug'
-      path: '/macros/$slug'
-      fullPath: '/macros/$slug'
-      preLoaderRoute: typeof MacrosSlugRouteImport
+    '/def/$defSlug': {
+      id: '/def/$defSlug'
+      path: '/def/$defSlug'
+      fullPath: '/def/$defSlug'
+      preLoaderRoute: typeof DefDefSlugRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/editor/$defId': {
-      id: '/editor/$defId'
-      path: '/editor/$defId'
-      fullPath: '/editor/$defId'
-      preLoaderRoute: typeof EditorDefIdRouteImport
+    '/def/$defSlug_/$formulationRef': {
+      id: '/def/$defSlug_/$formulationRef'
+      path: '/def/$defSlug/$formulationRef'
+      fullPath: '/def/$defSlug/$formulationRef'
+      preLoaderRoute: typeof DefDefSlugFormulationRefRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -197,13 +198,13 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  EditorDefIdRoute: EditorDefIdRoute,
-  MacrosSlugRoute: MacrosSlugRoute,
-  WikiDefIdRoute: WikiDefIdRoute,
-  AccountIndexRoute: AccountIndexRoute,
+  DefDefSlugRoute: DefDefSlugRoute,
+  EditorDefSlugRoute: EditorDefSlugRoute,
+  MacrosUuidRoute: MacrosUuidRoute,
   EditorIndexRoute: EditorIndexRoute,
   MacrosIndexRoute: MacrosIndexRoute,
   WikiIndexRoute: WikiIndexRoute,
+  DefDefSlugFormulationRefRoute: DefDefSlugFormulationRefRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
