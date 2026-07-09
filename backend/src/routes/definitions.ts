@@ -1,308 +1,660 @@
-import { FastifyInstance } from 'fastify';
-import { prisma } from '../../lib/prisma';
-import { UUID } from 'node:crypto';
+import { Type } from '@sinclair/typebox';
+import { schemas } from '@crypto-wiki/shared';
+import type { CitationInput } from '@crypto-wiki/shared';
+import { prisma } from '../lib/prisma';
+import { isP2002, sendError } from '../lib/errors';
+import {
+  serializeDefinitionEditor,
+  serializeRevision,
+} from '../lib/serialize';
+import type { AppInstance } from '../app';
 
-// Prisma 7 driver adapters report the violated unique-constraint fields under
-// meta.driverAdapterError, not meta.target like the classic engine did
-function p2002Fields(err: any): string[] {
-  const fields =
-    err.meta?.driverAdapterError?.cause?.constraint?.fields ?? err.meta?.target ?? [];
-  const list = Array.isArray(fields) ? fields : [fields];
-  return list.map((f: unknown) => String(f).replace(/"/g, ''));
+// Editor API: full CRUD over definitions / formulations / revisions,
+// including drafts. The invariant this file enforces everywhere:
+// **published revisions are immutable** — no update, no delete, and nothing
+// that would break an existing permalink (definition/formulation slugs
+// freeze once anything under them is published).
+
+const DefParams = Type.Object({ defSlug: schemas.Slug });
+const FormulationParams = Type.Object({ defSlug: schemas.Slug, fSlug: schemas.Slug });
+const RevisionParams = Type.Object({
+  defSlug: schemas.Slug,
+  fSlug: schemas.Slug,
+  revisionId: Type.Integer({ minimum: 1 }),
+});
+
+// map a CitationInput onto the flat cite* columns; null clears a field
+function citationData(c?: CitationInput) {
+  if (!c) return {};
+  const out: Record<string, string | number | null> = {};
+  if (c.paper !== undefined) out.citePaper = c.paper;
+  if (c.authors !== undefined) out.citeAuthors = c.authors;
+  if (c.venue !== undefined) out.citeVenue = c.venue;
+  if (c.year !== undefined) out.citeYear = c.year;
+  if (c.doi !== undefined) out.citeDoi = c.doi;
+  if (c.eprint !== undefined) out.citeEprint = c.eprint;
+  return out;
 }
 
-export async function definitionRoutes(fastify: FastifyInstance) {
-  // get all default versions of definitions
-  fastify.get('/definitions', async () => {
-    const defs = await prisma.definition.findMany({
-      include: {
-        versions: {
-          where: { isDefault: true },
-          include: { defaultMacroSet: true },
+const editorInclude = {
+  categories: true,
+  formulations: {
+    orderBy: { order: 'asc' },
+    include: {
+      defaultMacroSet: true,
+      revisions: { orderBy: { createdAt: 'desc' } },
+    },
+  },
+} as const;
+
+export async function definitionRoutes(app: AppInstance) {
+  // ------------------------------------------------------------------ list
+  app.get(
+    '/definitions',
+    {
+      schema: {
+        querystring: schemas.ListDefinitionsQuery,
+        response: { 200: schemas.DefinitionList },
+      },
+    },
+    async (request) => {
+      const { q, category } = request.query;
+      const defs = await prisma.definition.findMany({
+        where: {
+          ...(q
+            ? {
+                OR: [
+                  { title: { contains: q, mode: 'insensitive' } },
+                  { slug: { contains: q, mode: 'insensitive' } },
+                ],
+              }
+            : {}),
+          ...(category ? { categories: { some: { name: category } } } : {}),
         },
-        categories: true,
-      },
-    });
-
-    const cleanedDefs: ConcreteDefinition[] = defs.map((def) => {
-      const defaultVersion = def.versions[0];
-      return {
-        title: def.title,
-        categories: def.categories.map((category) => category.name),
-        bodyLatex: defaultVersion?.bodyLatex || '',
-        macros: (defaultVersion?.defaultMacroSet?.macros as Record<string, string>) || {},
-        versionSlug: defaultVersion?.slug || '',
-      };
-    });
-
-    return cleanedDefs;
-  });
-
-  // get a particular definition (e.g. prf)
-  // can ask for a particular version or default version
-  // can also ask for a particular macro set or default macro set
-  fastify.get('/definitions/:slug', async (request, reply) => {
-    const { slug } = request.params as { slug: string };
-    const { version: versionSlug, macroSetId: macroUUID } = request.query as {
-      version: string;
-      macroSetId: UUID;
-    };
-
-    // fetch definition by title (e.g. prf)
-    const definition = await prisma.definition.findUnique({
-      where: { title: slug },
-      include: { categories: true },
-    });
-
-    if (!definition) {
-      return reply.code(404).send({
-        error: `Definition ${slug} not found`,
-      });
-    }
-
-    const query = {
-      where: {
-        definitionId: definition.id,
-        // if we're looking for a specific defn. version (e.g. version=alt), get that.
-        // otherwise, get default version
-        ...(versionSlug ? { slug: versionSlug } : { isDefault: true }),
-      },
-      include: {
-        defaultMacroSet: true,
-      },
-    };
-
-    // fetch one particular definition version (e.g. prf, version=alt)
-    const definitionVersion = await prisma.definitionVersion.findFirst(query);
-
-    if (!definitionVersion) {
-      return reply.code(404).send({
-        error: versionSlug
-          ? `Version "${versionSlug}" not found for definition ${slug}`
-          : `No default version found for definition ${slug}`,
-      });
-    }
-
-    // also fetch all available versions for this definition
-    const versionsMetadata = await prisma.definitionVersion.findMany({
-      where: { definitionId: definition.id },
-      select: { slug: true, order: true, isDefault: true },
-      orderBy: { order: 'asc' },
-    });
-
-    let macroSet;
-    if (macroUUID) {
-      // a macroset is specified, try to find that one.
-      macroSet = await prisma.macroSet.findUnique({ where: { uuid: macroUUID } });
-      if (!macroSet) {
-        return reply.code(404).send({
-          error: `Macro set ${macroUUID} not found`,
-        });
-      }
-    } else {
-      // macroset is not specified, if this definitionversion has a defaultMacroSet use that.
-      // otherwise, use no macros
-      macroSet = definitionVersion.defaultMacroSet || { macros: {} };
-    }
-
-    const defResponse: ConcreteDefinition = {
-      title: definition.title,
-      categories: definition.categories.map((category) => category.name),
-      versionSlug: definitionVersion.slug,
-      bodyLatex: definitionVersion.bodyLatex,
-      macros: (macroSet?.macros as Record<string, string>) || {},
-      versions: versionsMetadata,
-    };
-
-    return defResponse;
-  });
-
-  // post a new type of definition (e.g. prf) and create a default DefinitionVersion
-  // (e.g. prf, default version)
-  fastify.post('/definitions', async (request, reply) => {
-    const { title, categories, bodyLatex, macros, versionSlug } =
-      request.body as ConcreteDefinition;
-
-    // check if definition with given title already exists
-    const existing = await prisma.definition.findUnique({
-      where: { title },
-    });
-
-    if (existing) {
-      return reply.code(409).send({
-        error: `Definition with title ${title} already exists`,
-      });
-    }
-
-    // set up a new definition, make it a default version
-    // (since none of this type of definition exists yet)
-    const newDefData = {
-      title,
-      categories: {
-        connectOrCreate: categories.map((category) => ({
-          where: { name: category },
-          create: { name: category },
-        })),
-      },
-      versions: {
-        create: {
-          slug: versionSlug || 'default',
-          bodyLatex,
-          isDefault: true, // default version of definition
-          defaultMacroSet: {
-            create: {
-              macros, // creates row in MacroSet table
-            },
-          },
-        },
-      },
-    };
-
-    try {
-      // try creating new definition + a default version
-      const newDef = await prisma.definition.create({
-        data: newDefData,
         include: {
           categories: true,
-          versions: {
-            include: { defaultMacroSet: true },
+          formulations: {
+            include: { revisions: { where: { status: 'published' }, take: 1 } },
           },
         },
+        orderBy: { title: 'asc' },
       });
-      return newDef;
-    } catch (err: any) {
-      // handle prisma unique constraint errors (race condition)
-      if (err.code === 'P2002' && p2002Fields(err).includes('title')) {
-        return reply.code(409).send({
-          error: `Definition with title "${title}" already exists.`,
-        });
-      }
+      return defs.map((d) => ({
+        slug: d.slug,
+        title: d.title,
+        categories: d.categories.map((c) => c.name).sort(),
+        formulationCount: d.formulations.length,
+        hasPublished: d.formulations.some((f) => f.revisions.length > 0),
+        updatedAt: d.updatedAt.toISOString(),
+      }));
+    },
+  );
 
-      // Unexpected error
-      fastify.log.error(err);
-      return reply.code(500).send({
-        error: 'Unexpected server error.',
+  app.get(
+    '/categories',
+    { schema: { response: { 200: schemas.CategoryList } } },
+    async () => {
+      const cats = await prisma.category.findMany({
+        include: { _count: { select: { definitions: true } } },
+        orderBy: { name: 'asc' },
       });
-    }
-  });
+      return cats.map((c) => ({ name: c.name, definitionCount: c._count.definitions }));
+    },
+  );
 
-  // add a new version to an existing definition
-  // (e.g. to prf, add prf v2)
-  fastify.post('/definitions/:title', async (request, reply) => {
-    // title of definition we are creating a new version for
-    const { title } = request.params as { title: string };
-
-    // extract definitionVersion's fields
-    const { slug, bodyLatex, macros } = request.body as {
-      // maybe make slug unique??
-      slug: string;
-      bodyLatex: string;
-      macros?: Record<string, string>;
-    };
-
-    // check if definition exists
-    const existing = await prisma.definition.findUnique({
-      where: { title },
-      include: {
-        versions: true,
+  // ---------------------------------------------------------------- create
+  app.post(
+    '/definitions',
+    {
+      schema: {
+        body: schemas.CreateDefinitionBody,
+        response: { 201: schemas.DefinitionEditor, 409: schemas.ApiError },
       },
-    });
-
-    if (!existing) {
-      return reply.code(404).send({
-        error: `Definition with title ${title} not found`,
-      });
-    }
-
-    // this new version comes last; use max(order) + 1 rather than array length,
-    // which produces duplicate orders once any version has been deleted
-    const maxOrder = await prisma.definitionVersion.aggregate({
-      where: { definitionId: existing.id },
-      _max: { order: true },
-    });
-    const newOrder = (maxOrder._max.order ?? -1) + 1;
-
-    const baseVersionData = {
-      slug,
-      bodyLatex,
-      order: newOrder,
-      isDefault: false,
-      // get the id of the existing definition
-      definition: {
-        connect: { id: existing.id },
-      },
-    };
-
-    // if there's macros, add those on to the data, o/w just send the base data
-    const newVersionData = macros
-      ? {
-          ...baseVersionData,
-          defaultMacroSet: {
-            create: {
-              macros,
+    },
+    async (request, reply) => {
+      const { slug, title, categories = [], formulation } = request.body;
+      try {
+        const def = await prisma.definition.create({
+          data: {
+            slug,
+            title,
+            categories: {
+              connectOrCreate: categories.map((name) => ({ where: { name }, create: { name } })),
             },
+            ...(formulation
+              ? {
+                  formulations: {
+                    create: {
+                      slug: formulation.slug ?? 'default',
+                      isDefault: true,
+                      order: 0,
+                      ...citationData(formulation.citation),
+                      revisions: {
+                        create: {
+                          bodyLatex: formulation.bodyLatex ?? '',
+                          commentaryMd: formulation.commentaryMd ?? '',
+                        },
+                      },
+                    },
+                  },
+                }
+              : {}),
           },
+          include: editorInclude,
+        });
+        return reply
+          .code(201)
+          .send(serializeDefinitionEditor(def, def.formulations));
+      } catch (err) {
+        if (isP2002(err, 'slug')) {
+          return sendError(reply, 409, 'SLUG_TAKEN', `A definition with slug "${slug}" already exists.`);
         }
-      : baseVersionData;
+        if (isP2002(err, 'title')) {
+          return sendError(reply, 409, 'TITLE_TAKEN', `A definition titled "${title}" already exists.`);
+        }
+        throw err;
+      }
+    },
+  );
 
-    try {
-      const newVersion = await prisma.definitionVersion.create({
-        data: newVersionData,
+  // ------------------------------------------------------------------ read
+  app.get(
+    '/definitions/:defSlug',
+    {
+      schema: {
+        params: DefParams,
+        response: { 200: schemas.DefinitionEditor, 404: schemas.ApiError },
+      },
+    },
+    async (request, reply) => {
+      const def = await prisma.definition.findUnique({
+        where: { slug: request.params.defSlug },
+        include: editorInclude,
+      });
+      if (!def) {
+        return sendError(reply, 404, 'DEFINITION_NOT_FOUND', `Definition "${request.params.defSlug}" not found.`);
+      }
+      return serializeDefinitionEditor(def, def.formulations);
+    },
+  );
+
+  // ---------------------------------------------------------------- update
+  app.patch(
+    '/definitions/:defSlug',
+    {
+      schema: {
+        params: DefParams,
+        body: schemas.UpdateDefinitionBody,
+        response: { 200: schemas.DefinitionEditor, 404: schemas.ApiError, 409: schemas.ApiError },
+      },
+    },
+    async (request, reply) => {
+      const { title, categories } = request.body;
+      try {
+        const def = await prisma.definition.update({
+          where: { slug: request.params.defSlug },
+          data: {
+            ...(title !== undefined ? { title } : {}),
+            ...(categories !== undefined
+              ? {
+                  categories: {
+                    set: [],
+                    connectOrCreate: categories.map((name) => ({
+                      where: { name },
+                      create: { name },
+                    })),
+                  },
+                }
+              : {}),
+          },
+          include: editorInclude,
+        });
+        return serializeDefinitionEditor(def, def.formulations);
+      } catch (err) {
+        if ((err as { code?: string }).code === 'P2025') {
+          return sendError(reply, 404, 'DEFINITION_NOT_FOUND', `Definition "${request.params.defSlug}" not found.`);
+        }
+        if (isP2002(err, 'title')) {
+          return sendError(reply, 409, 'TITLE_TAKEN', `A definition titled "${title}" already exists.`);
+        }
+        throw err;
+      }
+    },
+  );
+
+  // ---------------------------------------------------------------- delete
+  app.delete(
+    '/definitions/:defSlug',
+    {
+      schema: {
+        params: DefParams,
+        response: { 204: Type.Null(), 404: schemas.ApiError, 409: schemas.ApiError },
+      },
+    },
+    async (request, reply) => {
+      const def = await prisma.definition.findUnique({
+        where: { slug: request.params.defSlug },
+        select: { id: true },
+      });
+      if (!def) {
+        return sendError(reply, 404, 'DEFINITION_NOT_FOUND', `Definition "${request.params.defSlug}" not found.`);
+      }
+      const publishedCount = await prisma.revision.count({
+        where: { formulation: { definitionId: def.id }, status: 'published' },
+      });
+      if (publishedCount > 0) {
+        return sendError(
+          reply,
+          409,
+          'HAS_PUBLISHED',
+          'This definition has published revisions; permalinks must keep working, so it cannot be deleted.',
+        );
+      }
+      await prisma.$transaction([
+        prisma.revision.deleteMany({ where: { formulation: { definitionId: def.id } } }),
+        prisma.formulation.deleteMany({ where: { definitionId: def.id } }),
+        prisma.definition.delete({ where: { id: def.id } }),
+      ]);
+      return reply.code(204).send(null);
+    },
+  );
+
+  // ---------------------------------------------------------- formulations
+  app.post(
+    '/definitions/:defSlug/formulations',
+    {
+      schema: {
+        params: DefParams,
+        body: schemas.CreateFormulationBody,
+        response: {
+          201: schemas.DefinitionEditor,
+          404: schemas.ApiError,
+          409: schemas.ApiError,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { defSlug } = request.params;
+      const { slug, citation, defaultMacroSetUuid, isDefault } = request.body;
+
+      const def = await prisma.definition.findUnique({
+        where: { slug: defSlug },
+        include: { formulations: { select: { id: true, order: true } } },
+      });
+      if (!def) {
+        return sendError(reply, 404, 'DEFINITION_NOT_FOUND', `Definition "${defSlug}" not found.`);
+      }
+
+      let macroSetId: number | null = null;
+      if (defaultMacroSetUuid) {
+        const set = await prisma.macroSet.findUnique({ where: { uuid: defaultMacroSetUuid } });
+        if (!set) {
+          return sendError(reply, 404, 'MACRO_SET_NOT_FOUND', `Macro set ${defaultMacroSetUuid} not found.`);
+        }
+        macroSetId = set.id;
+      }
+
+      // the first formulation is always the default one
+      const makeDefault = isDefault === true || def.formulations.length === 0;
+      const nextOrder = def.formulations.reduce((m, f) => Math.max(m, f.order + 1), 0);
+
+      try {
+        await prisma.$transaction(async (tx) => {
+          if (makeDefault) {
+            await tx.formulation.updateMany({
+              where: { definitionId: def.id },
+              data: { isDefault: false },
+            });
+          }
+          await tx.formulation.create({
+            data: {
+              slug,
+              definitionId: def.id,
+              isDefault: makeDefault,
+              order: nextOrder,
+              defaultMacroSetId: macroSetId,
+              ...citationData(citation),
+            },
+          });
+        });
+      } catch (err) {
+        if (isP2002(err, 'slug')) {
+          return sendError(reply, 409, 'SLUG_TAKEN', `Formulation "${slug}" already exists on "${defSlug}".`);
+        }
+        if (isP2002(err, 'order')) {
+          return sendError(reply, 409, 'CONCURRENT_WRITE', 'Concurrent formulation creation; please retry.');
+        }
+        throw err;
+      }
+
+      const updated = await prisma.definition.findUniqueOrThrow({
+        where: { id: def.id },
+        include: editorInclude,
+      });
+      return reply.code(201).send(serializeDefinitionEditor(updated, updated.formulations));
+    },
+  );
+
+  app.patch(
+    '/definitions/:defSlug/formulations/:fSlug',
+    {
+      schema: {
+        params: FormulationParams,
+        body: schemas.UpdateFormulationBody,
+        response: {
+          200: schemas.DefinitionEditor,
+          404: schemas.ApiError,
+          409: schemas.ApiError,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { defSlug, fSlug } = request.params;
+      const { slug: newSlug, citation, defaultMacroSetUuid, isDefault } = request.body;
+
+      const formulation = await prisma.formulation.findFirst({
+        where: { slug: fSlug, definition: { slug: defSlug } },
         include: {
-          defaultMacroSet: true,
+          _count: { select: { revisions: { where: { status: 'published' } } } },
         },
       });
-      return reply.code(201).send(newVersion);
-    } catch (err: any) {
-      // handle prisma unique constraint errors (race condition)
-      // the uniques on DefinitionVersion are [definitionId, slug] and [definitionId, order]
-      if (err.code === 'P2002' && p2002Fields(err).includes('slug')) {
-        return reply.code(409).send({
-          error: `Version "${slug}" already exists for definition "${title}".`,
-        });
-      }
-      if (err.code === 'P2002' && p2002Fields(err).includes('order')) {
-        return reply.code(409).send({
-          error: `Concurrent version creation for "${title}", please retry.`,
-        });
+      if (!formulation) {
+        return sendError(reply, 404, 'FORMULATION_NOT_FOUND', `Definition "${defSlug}" has no formulation "${fSlug}".`);
       }
 
-      // Unexpected error
-      fastify.log.error(err);
-      return reply.code(500).send({
-        error: 'Unexpected server error.',
+      if (newSlug !== undefined && newSlug !== fSlug && formulation._count.revisions > 0) {
+        return sendError(
+          reply,
+          409,
+          'FORMULATION_FROZEN',
+          'This formulation has published revisions; its slug is part of citable permalinks and cannot change.',
+        );
+      }
+
+      let macroSetPatch = {};
+      if (defaultMacroSetUuid === null) {
+        macroSetPatch = { defaultMacroSetId: null };
+      } else if (defaultMacroSetUuid !== undefined) {
+        const set = await prisma.macroSet.findUnique({ where: { uuid: defaultMacroSetUuid } });
+        if (!set) {
+          return sendError(reply, 404, 'MACRO_SET_NOT_FOUND', `Macro set ${defaultMacroSetUuid} not found.`);
+        }
+        macroSetPatch = { defaultMacroSetId: set.id };
+      }
+
+      try {
+        await prisma.$transaction(async (tx) => {
+          if (isDefault === true) {
+            await tx.formulation.updateMany({
+              where: { definitionId: formulation.definitionId },
+              data: { isDefault: false },
+            });
+          }
+          await tx.formulation.update({
+            where: { id: formulation.id },
+            data: {
+              ...(newSlug !== undefined ? { slug: newSlug } : {}),
+              ...(isDefault === true ? { isDefault: true } : {}),
+              ...macroSetPatch,
+              ...citationData(citation),
+            },
+          });
+        });
+      } catch (err) {
+        if (isP2002(err, 'slug')) {
+          return sendError(reply, 409, 'SLUG_TAKEN', `Formulation "${newSlug}" already exists on "${defSlug}".`);
+        }
+        throw err;
+      }
+
+      const updated = await prisma.definition.findUniqueOrThrow({
+        where: { slug: defSlug },
+        include: editorInclude,
       });
-    }
-  });
+      return serializeDefinitionEditor(updated, updated.formulations);
+    },
+  );
 
-  // // PUT update
-  // fastify.put('/definitions/:id', async (request, reply) => {
-  //   // LATER: think abt how versioning history comes in here
-  //   const { id } = request.params as { id: string };
-  //   const { title, category, bodyLatex } = request.body as any;
-  //   const updated = await prisma.definition.update({
-  //     where: {
-  //       id: Number(id),
-  //     },
-  //     data: { title, category, bodyLatex },
-  //   });
+  app.delete(
+    '/definitions/:defSlug/formulations/:fSlug',
+    {
+      schema: {
+        params: FormulationParams,
+        response: { 204: Type.Null(), 404: schemas.ApiError, 409: schemas.ApiError },
+      },
+    },
+    async (request, reply) => {
+      const { defSlug, fSlug } = request.params;
+      const formulation = await prisma.formulation.findFirst({
+        where: { slug: fSlug, definition: { slug: defSlug } },
+        include: {
+          _count: { select: { revisions: { where: { status: 'published' } } } },
+        },
+      });
+      if (!formulation) {
+        return sendError(reply, 404, 'FORMULATION_NOT_FOUND', `Definition "${defSlug}" has no formulation "${fSlug}".`);
+      }
+      if (formulation._count.revisions > 0) {
+        return sendError(
+          reply,
+          409,
+          'HAS_PUBLISHED',
+          'This formulation has published revisions; permalinks must keep working, so it cannot be deleted.',
+        );
+      }
+      await prisma.$transaction(async (tx) => {
+        await tx.revision.deleteMany({ where: { formulationId: formulation.id } });
+        await tx.formulation.delete({ where: { id: formulation.id } });
+        if (formulation.isDefault) {
+          // promote the next formulation (lowest order) so a default always exists
+          const next = await tx.formulation.findFirst({
+            where: { definitionId: formulation.definitionId },
+            orderBy: { order: 'asc' },
+          });
+          if (next) {
+            await tx.formulation.update({ where: { id: next.id }, data: { isDefault: true } });
+          }
+        }
+      });
+      return reply.code(204).send(null);
+    },
+  );
 
-  //   return updated;
-  // });
+  // ------------------------------------------------------------- revisions
+  async function findFormulation(defSlug: string, fSlug: string) {
+    return prisma.formulation.findFirst({
+      where: { slug: fSlug, definition: { slug: defSlug } },
+    });
+  }
 
-  // // Delete definition
-  // fastify.delete('/definitions/:id', async (request, reply) => {
-  //   const { id } = request.params as { id: string };
+  app.get(
+    '/definitions/:defSlug/formulations/:fSlug/revisions',
+    {
+      schema: {
+        params: FormulationParams,
+        response: { 200: Type.Array(schemas.Revision), 404: schemas.ApiError },
+      },
+    },
+    async (request, reply) => {
+      const { defSlug, fSlug } = request.params;
+      const formulation = await findFormulation(defSlug, fSlug);
+      if (!formulation) {
+        return sendError(reply, 404, 'FORMULATION_NOT_FOUND', `Definition "${defSlug}" has no formulation "${fSlug}".`);
+      }
+      const revisions = await prisma.revision.findMany({
+        where: { formulationId: formulation.id },
+        orderBy: { createdAt: 'desc' },
+      });
+      return revisions.map(serializeRevision);
+    },
+  );
 
-  //   await prisma.definition.delete({
-  //     where: {
-  //       id: Number(id),
-  //     },
-  //   });
+  app.post(
+    '/definitions/:defSlug/formulations/:fSlug/revisions',
+    {
+      schema: {
+        params: FormulationParams,
+        body: schemas.CreateRevisionBody,
+        response: { 201: schemas.Revision, 404: schemas.ApiError },
+      },
+    },
+    async (request, reply) => {
+      const { defSlug, fSlug } = request.params;
+      const formulation = await findFormulation(defSlug, fSlug);
+      if (!formulation) {
+        return sendError(reply, 404, 'FORMULATION_NOT_FOUND', `Definition "${defSlug}" has no formulation "${fSlug}".`);
+      }
+      const revision = await prisma.revision.create({
+        data: {
+          formulationId: formulation.id,
+          bodyLatex: request.body.bodyLatex,
+          commentaryMd: request.body.commentaryMd ?? '',
+        },
+      });
+      return reply.code(201).send(serializeRevision(revision));
+    },
+  );
 
-  //   return {
-  //     message: 'Deleted successfully',
-  //   };
-  // });
-  // TODO: Macro set CRUD as well
+  // shared lookup: revision by id, scoped to its definition+formulation path
+  async function findRevision(defSlug: string, fSlug: string, revisionId: number) {
+    return prisma.revision.findFirst({
+      where: {
+        id: revisionId,
+        formulation: { slug: fSlug, definition: { slug: defSlug } },
+      },
+    });
+  }
+
+  app.get(
+    '/definitions/:defSlug/formulations/:fSlug/revisions/:revisionId',
+    {
+      schema: {
+        params: RevisionParams,
+        response: { 200: schemas.Revision, 404: schemas.ApiError },
+      },
+    },
+    async (request, reply) => {
+      const { defSlug, fSlug, revisionId } = request.params;
+      const revision = await findRevision(defSlug, fSlug, revisionId);
+      if (!revision) {
+        return sendError(reply, 404, 'REVISION_NOT_FOUND', `No revision ${revisionId} under ${defSlug}/${fSlug}.`);
+      }
+      return serializeRevision(revision);
+    },
+  );
+
+  app.patch(
+    '/definitions/:defSlug/formulations/:fSlug/revisions/:revisionId',
+    {
+      schema: {
+        params: RevisionParams,
+        body: schemas.UpdateRevisionBody,
+        response: { 200: schemas.Revision, 404: schemas.ApiError, 409: schemas.ApiError },
+      },
+    },
+    async (request, reply) => {
+      const { defSlug, fSlug, revisionId } = request.params;
+      const revision = await findRevision(defSlug, fSlug, revisionId);
+      if (!revision) {
+        return sendError(reply, 404, 'REVISION_NOT_FOUND', `No revision ${revisionId} under ${defSlug}/${fSlug}.`);
+      }
+      if (revision.status === 'published') {
+        return sendError(
+          reply,
+          409,
+          'REVISION_IMMUTABLE',
+          'Published revisions are immutable. Create a new revision instead.',
+        );
+      }
+      const updated = await prisma.revision.update({
+        where: { id: revision.id },
+        data: {
+          ...(request.body.bodyLatex !== undefined ? { bodyLatex: request.body.bodyLatex } : {}),
+          ...(request.body.commentaryMd !== undefined
+            ? { commentaryMd: request.body.commentaryMd }
+            : {}),
+        },
+      });
+      return serializeRevision(updated);
+    },
+  );
+
+  app.post(
+    '/definitions/:defSlug/formulations/:fSlug/revisions/:revisionId/publish',
+    {
+      schema: {
+        params: RevisionParams,
+        response: {
+          200: schemas.Revision,
+          404: schemas.ApiError,
+          409: schemas.ApiError,
+          422: schemas.ApiError,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { defSlug, fSlug, revisionId } = request.params;
+      const revision = await findRevision(defSlug, fSlug, revisionId);
+      if (!revision) {
+        return sendError(reply, 404, 'REVISION_NOT_FOUND', `No revision ${revisionId} under ${defSlug}/${fSlug}.`);
+      }
+      if (revision.status === 'published') {
+        return sendError(reply, 409, 'ALREADY_PUBLISHED', `Revision ${revisionId} is already published as r${revision.number}.`);
+      }
+      if (revision.bodyLatex.trim() === '') {
+        return sendError(reply, 422, 'EMPTY_BODY', 'Cannot publish a revision with an empty LaTeX body.');
+      }
+
+      try {
+        const published = await prisma.$transaction(async (tx) => {
+          const max = await tx.revision.aggregate({
+            where: { formulationId: revision.formulationId, status: 'published' },
+            _max: { number: true },
+          });
+          return tx.revision.update({
+            where: { id: revision.id },
+            data: {
+              status: 'published',
+              number: (max._max.number ?? 0) + 1,
+              publishedAt: new Date(),
+            },
+          });
+        });
+        return serializeRevision(published);
+      } catch (err) {
+        // unique [formulationId, number] lost a race with a concurrent publish
+        if (isP2002(err)) {
+          return sendError(reply, 409, 'CONCURRENT_WRITE', 'Concurrent publish; please retry.');
+        }
+        throw err;
+      }
+    },
+  );
+
+  app.delete(
+    '/definitions/:defSlug/formulations/:fSlug/revisions/:revisionId',
+    {
+      schema: {
+        params: RevisionParams,
+        response: { 204: Type.Null(), 404: schemas.ApiError, 409: schemas.ApiError },
+      },
+    },
+    async (request, reply) => {
+      const { defSlug, fSlug, revisionId } = request.params;
+      const revision = await findRevision(defSlug, fSlug, revisionId);
+      if (!revision) {
+        return sendError(reply, 404, 'REVISION_NOT_FOUND', `No revision ${revisionId} under ${defSlug}/${fSlug}.`);
+      }
+      if (revision.status === 'published') {
+        return sendError(
+          reply,
+          409,
+          'REVISION_IMMUTABLE',
+          'Published revisions are citable and cannot be deleted.',
+        );
+      }
+      await prisma.revision.delete({ where: { id: revision.id } });
+      return reply.code(204).send(null);
+    },
+  );
 }

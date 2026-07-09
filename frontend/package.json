@@ -1,5 +1,5 @@
 {
-  "name": "crypto-wiki",
+  "name": "@crypto-wiki/frontend",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -7,21 +7,22 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "echo \"no frontend tests yet\""
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.13",
     "@tanstack/react-query": "^5.90.3",
     "@tanstack/react-router": "^1.133.3",
     "@tanstack/react-router-devtools": "^1.133.25",
-    "better-react-mathjax": "^2.3.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "react-markdown": "^10.1.0",
     "rehype-katex": "^7.0.1",
-    "rehype-mathjax": "^7.1.0",
     "remark-math": "^6.0.0",
-    "tailwindcss": "^4.1.13"
+    "tailwindcss": "^4.1.13",
+    "@crypto-wiki/shared": "*",
+    "katex": "^0.16.22"
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
@@ -36,6 +37,7 @@
     "globals": "^16.3.0",
     "typescript": "~5.8.3",
     "typescript-eslint": "^8.39.1",
-    "vite": "^7.1.2"
+    "vite": "^7.1.2",
+    "@types/katex": "^0.16.7"
   }
 }

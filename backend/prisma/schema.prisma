@@ -7,75 +7,110 @@ datasource db {
   provider = "postgresql"
 }
 
-// high-level concept of a definition (e.g. pseudorandom function: prf)
+// high-level concept of a definition (e.g. PRF); holds no LaTeX itself
 model Definition {
-  // a given definition holds metadata about the concept, no actual LaTeX though
   id    Int    @id @default(autoincrement())
-  title String @unique
+  slug  String @unique // stable URL slug (e.g. "prf") — permanent once anything is published
+  title String @unique // display title (e.g. "Pseudorandom Function")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // a given definition can have many different versions
-  versions DefinitionVersion[]
-
-  // a given definition can also have many different categories (think of them as tags)
-  categories Category[]
+  formulations Formulation[]
+  categories   Category[]
 }
 
 model Category {
   id   Int    @id @default(autoincrement())
   name String @unique
 
-  // a given category can belong to many different definitions (many-to-many)
   definitions Definition[]
 }
 
-// one particular, concrete version of a definition, contains actual LaTeX
-model DefinitionVersion {
-  id        Int      @id @default(autoincrement())
+// one way of formalizing a definition (e.g. game-based vs indistinguishability-based)
+model Formulation {
+  id        Int     @id @default(autoincrement())
   slug      String
-  bodyLatex String
-  isDefault Boolean
-  order     Int      @default(0)
+  isDefault Boolean @default(false)
+  order     Int     @default(0)
+
+  // citation metadata: the paper this formulation originates from
+  citePaper   String?
+  citeAuthors String?
+  citeVenue   String?
+  citeYear    Int?
+  citeDoi     String?
+  citeEprint  String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // every definitionVersion must belong to exactly one definition
   definition   Definition @relation(fields: [definitionId], references: [id])
   definitionId Int
 
-  // every default version can have one or no defaultMacroSet (so when a def version is requested, if no macro set is specified, it is rendered with a defaultmacroset if it exists, no macros if it doesn't exist. if a macro set is specified, render with that instead)
+  // used when a request doesn't specify ?macros=
   defaultMacroSet   MacroSet? @relation(fields: [defaultMacroSetId], references: [id])
   defaultMacroSetId Int?
 
-  // citation field that represents whichever paper this definition version originated from (however, think about if the paper hasn't been published yet but we are adding defn.)
+  revisions Revision[]
 
-  @@unique([definitionId, slug]) // prevents duplicate slugs (version names) within one definitionId
-  @@unique([definitionId, order]) // prevents duplicate orders within one definitionId
+  @@unique([definitionId, slug])
+  @@unique([definitionId, order])
+}
+
+enum RevisionStatus {
+  draft
+  published
+}
+
+// an edit within a formulation; published revisions are immutable (enforced at the API layer)
+model Revision {
+  id           Int            @id @default(autoincrement())
+  status       RevisionStatus @default(draft)
+  number       Int? // assigned at publish time — the "r2" in /def/prf/game-based@r2
+  bodyLatex    String // pure LaTeX fragment, compilable by real LaTeX
+  commentaryMd String         @default("") // markdown commentary: intuition, remarks, cross-links
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  publishedAt DateTime?
+
+  formulation   Formulation @relation(fields: [formulationId], references: [id])
+  formulationId Int
+
+  @@unique([formulationId, number])
+}
+
+enum MacroSetVisibility {
+  public // listed in the site directory
+  unlisted // link-only
+  anonymous // link-only, zero public attribution (double-blind); never serialize timestamps
 }
 
 model MacroSet {
-  id        Int      @id @default(autoincrement())
-  uuid      String   @unique @default(uuid()) // used for URL references since it is universally unique
-  name      String?
-  macros    Json
+  id         Int                @id @default(autoincrement())
+  uuid       String             @unique @default(uuid()) // unguessable URL handle
+  name       String
+  macros     Json
+  visibility MacroSetVisibility @default(public)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // this macro set can be referenced by many definition versions
-  versions DefinitionVersion[]
+  formulations Formulation[]
+  snapshots    MacroSetSnapshot[]
 }
 
-// TODO: flesh this out more
-model User {
-  id        Int      @id @default(autoincrement())
-  email     String?  @unique
+// immutable content snapshot for permalink pinning (?macros=<uuid>@<hash>)
+model MacroSetSnapshot {
+  id     Int    @id @default(autoincrement())
+  hash   String // sha256 hex of the canonical JSON of `macros`
+  macros Json
+
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 
-  // If eventually we want to track who authored what:
-  // definitions Definition[]?
+  macroSet   MacroSet @relation(fields: [macroSetId], references: [id], onDelete: Cascade)
+  macroSetId Int
+
+  @@unique([macroSetId, hash])
 }
-
-// version history here

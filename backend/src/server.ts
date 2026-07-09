@@ -1,26 +1,10 @@
-import Fastify from 'fastify';
-import cors from '@fastify/cors';
-import { definitionRoutes } from './routes/definitions';
+import { buildApp } from './app';
 
-const fastify = Fastify({ logger: true });
+const app = buildApp();
 
-// allow the Vite dev server (and any origin, while there is no auth) to call the API
-fastify.register(cors, { origin: true });
-
-// base endpoint
-fastify.get('/', async (request, reply) => {
-  reply.send({
-    message: 'hello world',
-  });
-});
-
-// Register definition routes
-fastify.register(definitionRoutes);
-
-// run server
-fastify.listen({ port: 3000 }, (err, address) => {
+app.listen({ port: 3000 }, (err) => {
   if (err) {
-    fastify.log.error(err);
+    app.log.error(err);
     process.exit(1);
   }
 });

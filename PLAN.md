@@ -131,14 +131,19 @@ Markdown-as-definition-body (see body format above).
       All endpoints exercised (list/get/version/macro-override/create/409s/404s).
 
 ### Phase 1 — Core wiki loop (no auth yet)
-- [ ] Schema migration: `slug` vs `title` on Definition; revisions with
-      `draft/published` status and immutability; citation metadata on formulations
-      (paper, authors, venue, year, DOI/eprint); pure-LaTeX body + Markdown commentary
-      fields; macro-set visibility enum.
-- [ ] Permalink routes exactly as specced above, including macro-set pinning.
-- [ ] Backend hardening: request validation (TypeBox/Zod → Fastify schemas), macro-set
-      CRUD, consistent error responses, tests (vitest + test DB).
-- [ ] Shared types package in the monorepo so frontend/backend can't drift.
+- [x] Schema migration (2026-07-09): `slug` vs `title` on Definition; `Formulation`
+      (ex-DefinitionVersion) with citation metadata; `Revision` with `draft/published`
+      status, per-formulation `number` assigned at publish, pure-LaTeX body + Markdown
+      commentary; macro-set visibility enum + `MacroSetSnapshot` (content-hash pinning).
+- [x] Permalink routes: `/def/:slug`, `/def/:slug/:formulation`, `@rN` pinning,
+      `?macros=<uuid>` and pinned `?macros=<uuid>@<hash>`; drafts never visible;
+      published revisions immutable (API-enforced: no edit/delete/rename of anything
+      a permalink depends on).
+- [x] Backend hardening: TypeBox schemas (shared package) validate every route;
+      response schemas strip stray fields; consistent `{statusCode,error,code,message}`
+      errors; macro-set CRUD + pin + fork; 32 vitest tests against `cryptowiki_test`.
+- [x] Shared types package: npm workspaces monorepo, `@crypto-wiki/shared` holds
+      TypeBox schemas + `Static<>` types + permalink ref parsing.
 - [ ] **katex-cryptocode shim v0**: macro table (notation + `pc*` keywords + basic
       `\procedure`) shipped as the site's base macro layer; v1 adds the JS
       preprocessing pass (optional args, line numbers, alignment tabs, `\pchstack`).

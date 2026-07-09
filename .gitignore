@@ -1,6 +1,9 @@
+# workspaces
+node_modules/
+shared/dist/
+
 # backend
 backend/generated/
-backend/node_modules/
 backend/.env*
 
 

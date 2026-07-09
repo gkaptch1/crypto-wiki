@@ -1,0 +1,21 @@
+{
+  "name": "crypto-wiki",
+  "private": true,
+  "workspaces": [
+    "shared",
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "build": "npm run build -w @crypto-wiki/shared && npm run build -w @crypto-wiki/backend && npm run build -w @crypto-wiki/frontend",
+    "test": "npm run test -w @crypto-wiki/backend",
+    "dev:backend": "npm run dev -w @crypto-wiki/backend",
+    "dev:frontend": "npm run dev -w @crypto-wiki/frontend"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "prisma@7.8.0": true,
+    "@prisma/engines@7.8.0": true,
+    "@swc/core@1.15.43": true
+  }
+}
