@@ -12,3 +12,53 @@
 .crypto-definition .katex-display {
   margin: 0.5em 0;
 }
+
+/* Blocks emitted by the shared LaTeX fragment renderer (latex-render.ts) */
+.cc-par {
+  margin: 0.5rem 0;
+  line-height: 1.625;
+}
+.cc-display {
+  margin: 0.75rem 0;
+  overflow-x: auto;
+}
+.cc-center {
+  margin: 1rem 0;
+  display: flex;
+  justify-content: center;
+  overflow-x: auto;
+}
+.cc-list {
+  list-style: disc;
+  padding-left: 1.5rem;
+  margin: 0.5rem 0;
+}
+.cc-list > li + li {
+  margin-top: 0.25rem;
+}
+/* pchstack / pcvstack: side-by-side (or stacked) game boxes */
+.cc-hstack {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+}
+.cc-vstack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+.cc-stack-center {
+  justify-content: center;
+}
+.cc-vstack.cc-stack-center {
+  align-items: center;
+}
+.cc-stack-space {
+  flex: 0 0 1rem;
+}
+.cc-stack-item .katex-display {
+  margin: 0;
+}

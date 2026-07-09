@@ -3,18 +3,28 @@
 Wiki of formal cryptographic definitions that render exactly as in papers, with
 citable permalinks and per-viewer notation via macro sets. **PLAN.md is the source
 of truth** for architecture decisions and phased roadmap — read it before making
-design choices. Phase 0 (revive + spike) done; Phase 1 (core wiki loop) in progress.
+design choices. Phase 0 (revive + spike) and Phase 1 (core wiki loop, incl.
+katex-cryptocode shim v1 + regression harness) done; Phase 2 (auth) is next.
 
 ## Layout & stack (npm workspaces monorepo — run `npm install` at the ROOT)
-- `shared/` — `@crypto-wiki/shared`: TypeBox schemas + types + permalink-ref parsing;
-  the single source of truth for the API contract. **Build it after editing**
-  (`npm run build -w @crypto-wiki/shared`) — backend/frontend consume `dist/`.
+- `shared/` — `@crypto-wiki/shared`: TypeBox schemas + types + permalink-ref parsing,
+  plus the whole Tier-1 renderer: cryptocode macro table, the shim-v1 preprocessing
+  pass (`cryptocode-preprocess.ts`), and the block/fragment renderer
+  (`latex-render.ts`; frontend injects KaTeX, styles its `cc-*` classes in
+  `index.css`). **Build it after editing** (`npm run build -w @crypto-wiki/shared`)
+  — backend/frontend consume `dist/`.
 - `backend/` — Fastify + Prisma 7 + PostgreSQL. App in `src/app.ts` (buildApp, used by
   tests), routes in `src/routes/` (permalinks / definitions / macro-sets), schema in
   `prisma/schema.prisma`, seed in `prisma/seed.ts`, tests in `test/`.
 - `frontend/` — React + Vite + TanStack Router (file-based routes in `src/routes/`)
   + React Query + Tailwind. KaTeX rendering.
 - `spike/` — Phase 0 rendering spike (real LaTeX + cryptocode → SVG). Verdict: passed.
+- `render-tests/` — shim-vs-real-cryptocode regression harness (`npm run
+  render-tests`; needs a TeX install, else shim-only): compiles each
+  `fragments/*.tex` with real cryptocode, cross-checks tokens against the shim
+  render, writes `out/report.html` side by side. Teach the shim nothing without
+  adding a fragment; the seeded IND-CPA left-or-right body must stay in sync
+  with its fragment.
 
 ## Commands
 - Backend (`-w @crypto-wiki/backend` from root, or cd backend): `npm run dev`

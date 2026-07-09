@@ -1,0 +1,24 @@
+\textbf{Definition (IND-CPA Security, left-or-right formulation).}
+A symmetric encryption scheme $\Pi = (\Gen, \Enc, \Dec)$ is
+\emph{IND-CPA secure} if for every PPT adversary $\adv$,
+\[
+\left| \Pr\left[ \mathsf{LR}^{0}_{\adv,\Pi}(\secpar) = 1 \right]
+- \Pr\left[ \mathsf{LR}^{1}_{\adv,\Pi}(\secpar) = 1 \right] \right|
+\le \negl(\secpar),
+\]
+where the experiments differ only in which of the two submitted messages the
+oracle encrypts:
+
+\begin{pchstack}[center]
+\procedure[linenumbering]{$\mathsf{LR}^{0}_{\adv,\Pi}(\secpar)$}{
+  k \sample \Gen(1^\secpar) \\
+  b' \sample \adv^{\Enc_k(\mathsf{left}(\cdot,\cdot))}(1^\secpar) \\
+  \pcreturn b'
+}
+\pchspace
+\procedure[linenumbering]{$\mathsf{LR}^{1}_{\adv,\Pi}(\secpar)$}{
+  k \sample \Gen(1^\secpar) \\
+  \gamechange{$b' \sample \adv^{\Enc_k(\mathsf{right}(\cdot,\cdot))}(1^\secpar)$} \\
+  \pcreturn b'
+}
+\end{pchstack}

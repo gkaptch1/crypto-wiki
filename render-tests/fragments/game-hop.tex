@@ -1,0 +1,16 @@
+\textbf{Game hop.}
+Two adjacent games in a hybrid argument; the change is highlighted:
+
+\begin{pchstack}[center]
+\procedure{$\mathsf{Game}_0$}{
+  k \sample \bin^\secpar \\
+  y \gets F(k, x) \\
+  \pcreturn y
+}
+\pchspace
+\procedure{$\mathsf{Game}_1$}{
+  k \sample \bin^\secpar \\
+  \gamechange{$y \sample \bin^n$} \\
+  \pcreturn y
+}
+\end{pchstack}

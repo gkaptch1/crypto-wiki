@@ -152,6 +152,50 @@ access) outputs $b'$, and the experiment evaluates to $1$ iff $b' = b$.`,
           },
         ],
       },
+      {
+        // exercises shim v1 end to end: pchstack side-by-side games,
+        // [linenumbering], and a \gamechange highlight. The identical body is
+        // regression-tested against real cryptocode in
+        // render-tests/fragments/left-or-right.tex — keep the two in sync.
+        slug: 'left-or-right',
+        citation: {
+          paper: 'A Concrete Security Treatment of Symmetric Encryption',
+          authors: 'Bellare, Desai, Jokipii, Rogaway',
+          venue: 'FOCS',
+          year: 1997,
+        },
+        revisions: [
+          {
+            status: 'published',
+            bodyLatex: `\\textbf{Definition (IND-CPA Security, left-or-right formulation).}
+A symmetric encryption scheme $\\Pi = (\\Gen, \\Enc, \\Dec)$ is
+\\emph{IND-CPA secure} if for every PPT adversary $\\adv$,
+\\[
+\\left| \\Pr\\left[ \\mathsf{LR}^{0}_{\\adv,\\Pi}(\\secpar) = 1 \\right]
+- \\Pr\\left[ \\mathsf{LR}^{1}_{\\adv,\\Pi}(\\secpar) = 1 \\right] \\right|
+\\le \\negl(\\secpar),
+\\]
+where the experiments differ only in which of the two submitted messages the
+oracle encrypts:
+
+\\begin{pchstack}[center]
+\\procedure[linenumbering]{$\\mathsf{LR}^{0}_{\\adv,\\Pi}(\\secpar)$}{
+  k \\sample \\Gen(1^\\secpar) \\\\
+  b' \\sample \\adv^{\\Enc_k(\\mathsf{left}(\\cdot,\\cdot))}(1^\\secpar) \\\\
+  \\pcreturn b'
+}
+\\pchspace
+\\procedure[linenumbering]{$\\mathsf{LR}^{1}_{\\adv,\\Pi}(\\secpar)$}{
+  k \\sample \\Gen(1^\\secpar) \\\\
+  \\gamechange{$b' \\sample \\adv^{\\Enc_k(\\mathsf{right}(\\cdot,\\cdot))}(1^\\secpar)$} \\\\
+  \\pcreturn b'
+}
+\\end{pchstack}`,
+            commentaryMd:
+              'The oracle takes a pair $(m_0, m_1)$ and always encrypts the left (resp. right) one; the highlighted line is the only difference between the two experiments. Equivalent to the bit-guessing formulation up to a factor of 2 in the advantage.',
+          },
+        ],
+      },
     ],
   },
   {

@@ -6,12 +6,13 @@
  * spike: `spike/katex-shim-test.mjs`). A user macro set is merged OVER this
  * table at render time, so definitions can freely reuse or override any of it.
  *
- * v1 adds the JS preprocessing pass for the parts plain macros cannot express:
- * optional args (\procedure[...]), \pcln line numbers, alignment tabs,
- * \pchstack side-by-side games, \gamechange highlights.
+ * v1 (cryptocode-preprocess.ts) adds the JS preprocessing pass for the parts
+ * plain macros cannot express: optional args (\procedure[...]), \pcln line
+ * numbers, alignment tabs, \pchstack side-by-side games, \gamechange
+ * highlights.
  *
  * Ground truth is always real cryptocode via the Tier-2 pipeline; the
- * publish-time/CI regression check (Phase 3) keeps this table honest.
+ * render-tests/ harness keeps this shim honest.
  */
 
 const notation: Record<string, string> = {
@@ -71,7 +72,10 @@ const keywords: Record<string, string> = {
   '\\pccomment': '\\quad\\text{// #1}',
 };
 
-// the game box: header line, rule, body — cryptocode's \procedure{name}{code}
+// The game box as a plain macro. Definition bodies never hit this: the v1
+// preprocessing pass rewrites \procedure (with optional args, tabs, line
+// numbers) before KaTeX sees it. It stays here as a fallback for Markdown
+// commentary, where rehype-katex renders without the preprocessing pass.
 const gameBox: Record<string, string> = {
   '\\procedure': '\\begin{array}{l}\\text{#1}\\\\[0.2em]\\hline\\\\[-0.9em] #2\\end{array}',
 };

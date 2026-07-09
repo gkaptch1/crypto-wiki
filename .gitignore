@@ -17,6 +17,9 @@ frontend/build/
 # spike build outputs (regenerate with spike/build.sh)
 spike/out/
 
+# regression-harness outputs (regenerate with npm run render-tests)
+render-tests/out/
+
 # misc
 .DS_Store
 .vscode/

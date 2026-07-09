@@ -1,0 +1,21 @@
+\textbf{Line numbers.}
+Automatic numbering via the \emph{linenumbering} option:
+
+\begin{center}
+\procedure[linenumbering]{$\mathsf{Init}(\secpar)$}{
+  k \sample \bin^\secpar \\
+  T \gets \emptyset \\
+  b \sample \bin \\
+  \pcreturn b
+}
+\end{center}
+
+Manual numbering of selected lines via \emph{pcln}:
+
+\begin{center}
+\procedure{$\mathsf{Manual}(x)$}{
+  \pcln y \gets x + 7 \\
+  z \gets y \cdot y \\
+  \pcln \pcreturn z
+}
+\end{center}

@@ -150,9 +150,23 @@ Markdown-as-definition-body (see body format above).
       macro set; plus a minimal LaTeX-fragment renderer (`frontend/src/lib/latex.ts`:
       paragraphs, `$…$`, `\[…\]`, center blocks, itemize, `\textbf`/`\emph`).
       Verified in-browser: the seeded cryptocode EUF-CMA game box renders.
-- [ ] **shim v1**: JS preprocessing pass (optional args `\procedure[…]`, `\pcln`
-      line numbers, alignment tabs, `\pchstack`, `\gamechange`) and the regression
-      harness comparing shim renders against real-LaTeX SVGs via the spike pipeline.
+- [x] **shim v1** (2026-07-09): JS preprocessing pass
+      (`shared/src/cryptocode-preprocess.ts`, exercised through the shared
+      fragment renderer `shared/src/latex-render.ts` that the frontend now
+      binds KaTeX to): `\procedure[…]`/`\pseudocode[…]` optional args
+      (`linenumbering`, `mode=text`), `\pcln`/`\pclnomit` line numbers
+      (typeset as cryptocode does: `\text{\scriptsize N}:`, reset per box),
+      `\t` alignment tabs (nested KaTeX arrays), `\pchstack`/`\pcvstack`/
+      `\pchspace` (flexbox, reflows on mobile), `\gamechange[color]{…}`
+      highlights (exact cryptocode semantics: content is text mode, math
+      needs its own `$…$` — a bare math body errors under real cryptocode
+      too), `\pcind[n]`. Plus the **regression harness** (`render-tests/`,
+      `npm run render-tests`): 7-fragment corpus compiled with real
+      cryptocode (spike pipeline → SVG + dvi2tty text) and cross-checked
+      token-by-token against the shim render, with a side-by-side HTML
+      report. It caught a real shim bug (auto-`$…$` in `\gamechange`) on its
+      first run. Seed grew an IND-CPA `left-or-right` formulation exercising
+      everything at once; verified in-browser incl. macro-set swap.
 - [x] Frontend rebuild (2026-07-09), on React Query throughout:
   - Wiki browse/search + category filter chips.
   - Definition page (`/def/...` permalinks as specced): formulation tabs, revision
@@ -174,8 +188,8 @@ Markdown-as-definition-body (see body format above).
 
 ### Phase 3 — Production rendering + paper-linking polish
 - [ ] Productionize Tier 2 in its revised roles: sandboxed render container, on-demand
-      + LRU compile cache for escape-hatch bodies, and the publish-time/CI regression
-      check of shim renders against real LaTeX.
+      + LRU compile cache for escape-hatch bodies, and wiring the existing
+      `render-tests/` harness into CI and the publish flow.
 - [ ] "Cite this" widget: copies a LaTeX snippet (`\href`/footnote or a provided
       `\defcite` macro) with the pinned permalink + chosen macro set.
 - [ ] og-image/meta previews so links unfurl nicely.

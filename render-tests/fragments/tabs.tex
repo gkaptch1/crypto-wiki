@@ -1,0 +1,10 @@
+\textbf{Alignment tabs.}
+An oracle whose bookkeeping is aligned with tab stops:
+
+\begin{center}
+\procedure{$\mathsf{Oracle}(k, x)$}{
+  y \gets F(k, x) \t \text{evaluate} \\
+  T[x] \gets y \t \text{record} \\
+  \pcreturn y \t \text{answer}
+}
+\end{center}
