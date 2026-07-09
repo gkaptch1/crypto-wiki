@@ -10,6 +10,8 @@ import type {
   DefinitionListItem,
   DefinitionPage,
   ForkMacroSetBody,
+  ImportScanBody,
+  ImportScanResult,
   Invitation,
   MacroSetOwned,
   MacroSetPin,
@@ -111,6 +113,12 @@ export const pinMacroSet = (uuid: string) => api<MacroSetPin>(`/macro-sets/${uui
 
 export const forkMacroSet = (uuid: string, body: ForkMacroSetBody = {}) =>
   api<MacroSetPublic>(`/macro-sets/${uuid}/fork`, post(body));
+
+// ------------------------------------------------------------- paper import
+
+/** Step 1 of scan-then-select: extraction only, creates nothing. */
+export const importScan = (body: ImportScanBody) =>
+  api<ImportScanResult>('/import/scan', post(body));
 
 // -------------------------------------------------------- session-scoped (me)
 

@@ -16,6 +16,7 @@ import { definitionRoutes } from './routes/definitions';
 import { macroSetRoutes } from './routes/macro-sets';
 import { invitationRoutes } from './routes/invitations';
 import { meRoutes } from './routes/me';
+import { importRoutes } from './routes/import';
 
 export type AppInstance = FastifyInstance<
   RawServerDefault,
@@ -51,6 +52,9 @@ export function buildApp(opts: { logger?: boolean } = {}) {
     if (err.validation) {
       return sendError(reply, 400, 'VALIDATION', err.message);
     }
+    if (err.code === 'FST_ERR_CTP_BODY_TOO_LARGE') {
+      return sendError(reply, 413, 'BODY_TOO_LARGE', 'Request body too large.');
+    }
     request.log.error(err);
     return sendError(reply, 500, 'INTERNAL', 'Unexpected server error.');
   });
@@ -67,6 +71,7 @@ export function buildApp(opts: { logger?: boolean } = {}) {
   app.register(macroSetRoutes);
   app.register(invitationRoutes);
   app.register(meRoutes);
+  app.register(importRoutes);
 
   return app;
 }

@@ -36,5 +36,7 @@ export type UpdateRevisionBody = Static<typeof S.UpdateRevisionBody>;
 export type CreateMacroSetBody = Static<typeof S.CreateMacroSetBody>;
 export type UpdateMacroSetBody = Static<typeof S.UpdateMacroSetBody>;
 export type ForkMacroSetBody = Static<typeof S.ForkMacroSetBody>;
+export type ImportScanBody = Static<typeof S.ImportScanBody>;
+export type ImportScanResult = Static<typeof S.ImportScanResult>;
 export type ListDefinitionsQuery = Static<typeof S.ListDefinitionsQuery>;
 export type PermalinkQuery = Static<typeof S.PermalinkQuery>;

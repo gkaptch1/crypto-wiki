@@ -59,6 +59,11 @@ function RootLayout() {
               Editor
             </Link>
           )}
+          {isEditor && (
+            <Link to="/import" className={navLink}>
+              Import
+            </Link>
+          )}
           <Link to="/macros" className={navLink}>
             Macro sets
           </Link>

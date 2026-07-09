@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as SigninRouteImport } from './routes/signin'
+import { Route as ImportRouteImport } from './routes/import'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WikiIndexRouteImport } from './routes/wiki/index'
@@ -23,6 +24,11 @@ import { Route as DefDefSlugFormulationRefRouteImport } from './routes/def.$defS
 const SigninRoute = SigninRouteImport.update({
   id: '/signin',
   path: '/signin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ImportRoute = ImportRouteImport.update({
+  id: '/import',
+  path: '/import',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -75,6 +81,7 @@ const DefDefSlugFormulationRefRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/import': typeof ImportRoute
   '/signin': typeof SigninRoute
   '/def/$defSlug': typeof DefDefSlugRoute
   '/editor/$defSlug': typeof EditorDefSlugRoute
@@ -87,6 +94,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/import': typeof ImportRoute
   '/signin': typeof SigninRoute
   '/def/$defSlug': typeof DefDefSlugRoute
   '/editor/$defSlug': typeof EditorDefSlugRoute
@@ -100,6 +108,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
+  '/import': typeof ImportRoute
   '/signin': typeof SigninRoute
   '/def/$defSlug': typeof DefDefSlugRoute
   '/editor/$defSlug': typeof EditorDefSlugRoute
@@ -114,6 +123,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
+    | '/import'
     | '/signin'
     | '/def/$defSlug'
     | '/editor/$defSlug'
@@ -126,6 +136,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/admin'
+    | '/import'
     | '/signin'
     | '/def/$defSlug'
     | '/editor/$defSlug'
@@ -138,6 +149,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/admin'
+    | '/import'
     | '/signin'
     | '/def/$defSlug'
     | '/editor/$defSlug'
@@ -151,6 +163,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
+  ImportRoute: typeof ImportRoute
   SigninRoute: typeof SigninRoute
   DefDefSlugRoute: typeof DefDefSlugRoute
   EditorDefSlugRoute: typeof EditorDefSlugRoute
@@ -168,6 +181,13 @@ declare module '@tanstack/react-router' {
       path: '/signin'
       fullPath: '/signin'
       preLoaderRoute: typeof SigninRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/import': {
+      id: '/import'
+      path: '/import'
+      fullPath: '/import'
+      preLoaderRoute: typeof ImportRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -239,6 +259,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
+  ImportRoute: ImportRoute,
   SigninRoute: SigninRoute,
   DefDefSlugRoute: DefDefSlugRoute,
   EditorDefSlugRoute: EditorDefSlugRoute,

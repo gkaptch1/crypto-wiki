@@ -241,15 +241,28 @@ Markdown-as-definition-body (see body format above).
       greps overcount (3 commented-out definitions in the iO paper), 2512.20583
       genuinely nests one definition inside another, and 2402.09370 ships a stray
       duplicate `\begin{construction}` — which the extractor flags as a warning.
-- [ ] **Importer surface** — scan first, then select (user, 2026-07-09): almost
-      every paper carries more definitions than anyone wants to import (prelim
-      sections restate PRFs etc.), so the flow is two-step. Step 1: submit
-      source → backend runs `extractFromLatex` and returns the candidate list
-      (title, env, label, file:line, body preview, `usedMacros` count) — nothing
-      is created yet. Step 2: the user picks which candidates to pull in (and
-      what to name/slug them); only those become draft formulations, with their
-      combined `usedMacros` slices offered as a macro set. Everything lands as
-      drafts; nothing auto-publishes.
+- [x] **Importer surface** — scan first, then select (user, 2026-07-09), BUILT
+      same day: almost every paper carries more definitions than anyone wants
+      to import (prelim sections restate PRFs etc.), so the flow is two-step.
+      Step 1: `POST /import/scan` (editor-gated, 32 MB body limit) takes either
+      a `files` map (paste/upload — the primary path since ePrint has no
+      source) or an `arxivId` the backend fetches from `arxiv.org/e-print/`
+      (gunzip + minimal ustar reader in `backend/src/lib/arxiv.ts`; PDF-only
+      submissions get a distinct ARXIV_NO_SOURCE error pointing at the paste
+      path), runs `extractFromLatex`, and returns the candidate list — nothing
+      is created by scanning. Step 2 needs **no new backend surface**: the
+      `/import` frontend page drives the ordinary editor CRUD (create macro
+      set → definition → formulation → draft revision), so role gates and slug
+      invariants stay enforced in one place. The page renders per-candidate
+      previews through the Tier-1 shim (side by side with the raw LaTeX),
+      prefills slugs/titles from candidate metadata, adds a formulation to an
+      existing definition when the slug already exists, attaches the combined
+      `usedMacros` slice as a new (default-unlisted) macro set on each imported
+      formulation, stamps provenance (`Imported from …, file:line`) into the
+      commentary, and reports per-candidate success/errors with editor links.
+      Everything lands as drafts; nothing auto-publishes. 14 backend tests
+      (`backend/test/import.test.ts`); Playwright-driven end to end (paste and
+      arXiv flows, incl. importing from the real 2402.09370).
 - [ ] **Test corpus** of real papers (below): `.tex`-source papers for the
       deterministic importer, ePrint-only PDFs for the PDF/LLM stage, and one
       dual-hosted paper (ePrint PDF + arXiv source) whose source is ground truth for
@@ -265,8 +278,11 @@ Markdown-as-definition-body (see body format above).
       feedback / edits to refine the candidates before accepting them as drafts.
       Mostly UI design; preserves the nothing-auto-publishes invariant. The
       importer surface's scan-then-select step above is the first increment of
-      this loop; this item extends it to editing/refining candidate content, not
-      just choosing among candidates.
+      this loop (built); this item extends it to editing/refining candidate
+      content, not just choosing among candidates. Observed need from driving
+      the real flow: candidate titles are sometimes raw LaTeX
+      (`\Cref{def:skPRC,def:pkPRC}` in 2402.09370's intro) — cleaning those up
+      is exactly the refinement step this item covers.
 
 #### Candidate import corpus *(2026-07-09, revised with user picks same day)*
 

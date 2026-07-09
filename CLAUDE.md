@@ -6,7 +6,10 @@ of truth** for architecture decisions and phased roadmap — read it before maki
 design choices. Phases 0–2 done (revive + spike; core wiki loop incl. shim v1 +
 regression harness; accounts & invited write via better-auth). Phases re-ordered
 2026-07-09: **Phase 3 is now paper import** (deterministic LaTeX extractor →
-macro set + draft formulations; test corpus in PLAN.md); production rendering +
+macro set + draft formulations; test corpus in PLAN.md). Extractor, corpus
+harness, and the scan-then-select importer surface (`POST /import/scan` +
+`/import` page) are built; remaining: human-in-the-loop refinement UX, PDF/LLM
+stage. Production rendering +
 deploy polish moved to Phase 4 (blocked on university VM / OAuth creds / Docker
 anyway). Google/GitHub OAuth app credentials are NOT yet created — dev uses the
 password fallback below.
@@ -22,11 +25,17 @@ password fallback below.
   (`npm run build -w @crypto-wiki/shared`) — backend/frontend consume `dist/`.
 - `backend/` — Fastify + Prisma 7 + PostgreSQL + better-auth. App in `src/app.ts`
   (buildApp, used by tests), routes in `src/routes/` (permalinks / definitions /
-  macro-sets / auth / invitations / me), better-auth config + role-assignment hook
+  macro-sets / auth / invitations / me / import — `POST /import/scan` is the
+  importer's scan step: `files` map or `arxivId` in, extraction out, creates
+  nothing; arXiv fetch + gunzip + minimal ustar reader in `src/lib/arxiv.ts`),
+  better-auth config + role-assignment hook
   in `src/lib/auth.ts`, session guards (`requireEditor` etc.) in `src/lib/session.ts`,
   schema in `prisma/schema.prisma`, seed in `prisma/seed.ts`, tests in `test/`.
 - `frontend/` — React + Vite + TanStack Router (file-based routes in `src/routes/`)
-  + React Query + Tailwind. KaTeX rendering.
+  + React Query + Tailwind. KaTeX rendering. `/import` (editor-gated) is the
+  scan-then-select import page; its select step calls the ordinary editor CRUD
+  (macro set → definition → formulation → draft revision), no import-specific
+  write endpoint exists.
 - `spike/` — Phase 0 rendering spike (real LaTeX + cryptocode → SVG). Verdict: passed.
 - `render-tests/` — shim-vs-real-cryptocode regression harness (`npm run
   render-tests`; needs a TeX install, else shim-only): compiles each

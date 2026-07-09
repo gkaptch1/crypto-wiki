@@ -285,6 +285,94 @@ export const CreateInvitationBody = Type.Object({
   role: Type.Optional(InvitableRole),
 });
 
+// ---------------------------------------------------------------------------
+// Paper import (POST /import/scan) — mirrors latex-import.ts's result types.
+// Scanning creates nothing; the client drives the select step through the
+// normal editor CRUD.
+// ---------------------------------------------------------------------------
+
+/** arXiv id: new style "2402.09370[v2]" or old style "quant-ph/0301040". */
+export const ArxivId = Type.String({
+  pattern: '^(\\d{4}\\.\\d{4,5}|[a-z-]+(\\.[A-Z]{2})?/\\d{7})(v\\d+)?$',
+  maxLength: 40,
+});
+
+export const ImportScanBody = Type.Object({
+  /**
+   * filename → LaTeX content (paste/upload path). Exactly one of `files` /
+   * `arxivId` must be present — enforced in the handler, not the schema.
+   */
+  files: Type.Optional(
+    Type.Record(Type.String(), Type.String({ maxLength: 5_000_000 }), {
+      maxProperties: 400,
+    }),
+  ),
+  /** Entry file within `files`; defaults to every file with a \documentclass. */
+  mainFile: Type.Optional(Type.String({ maxLength: 300 })),
+  /** Fetch-by-id convenience path: the server downloads arxiv.org/e-print/<id>. */
+  arxivId: Type.Optional(ArxivId),
+});
+
+export const ImportMacroKind = Type.Union([
+  Type.Literal('newcommand'),
+  Type.Literal('renewcommand'),
+  Type.Literal('providecommand'),
+  Type.Literal('DeclareRobustCommand'),
+  Type.Literal('def'),
+  Type.Literal('DeclareMathOperator'),
+  Type.Literal('DeclarePairedDelimiter'),
+]);
+
+export const ImportMacro = Type.Object({
+  name: Type.String(),
+  kind: ImportMacroKind,
+  numArgs: Type.Integer(),
+  optionalDefault: Type.Union([Type.String(), Type.Null()]),
+  body: Type.String(),
+  file: Type.String(),
+  line: Type.Integer(),
+  katexSafe: Type.Boolean(),
+  issue: Type.Optional(Type.String()),
+});
+
+export const ImportTheoremEnv = Type.Object({
+  envName: Type.String(),
+  displayName: Type.String(),
+  file: Type.String(),
+  line: Type.Integer(),
+  extracted: Type.Boolean(),
+});
+
+export const ImportCandidate = Type.Object({
+  kind: Type.Union([Type.Literal('theorem-env'), Type.Literal('procedure')]),
+  envName: Type.String(),
+  displayName: Type.String(),
+  title: Type.Union([Type.String(), Type.Null()]),
+  label: Type.Union([Type.String(), Type.Null()]),
+  body: Type.String(),
+  file: Type.String(),
+  line: Type.Integer(),
+  usedMacros: Type.Array(Type.String()),
+});
+
+/**
+ * Like MacroMap but uncapped: a whole paper's preamble can exceed the
+ * 500-macro set limit (the extractor warns; the human trims during select).
+ */
+export const ImportMacroMap = Type.Record(
+  Type.String({ pattern: '^\\\\[a-zA-Z]+$' }),
+  Type.String(),
+);
+
+export const ImportScanResult = Type.Object({
+  macros: Type.Array(ImportMacro),
+  macroMap: ImportMacroMap,
+  theoremEnvs: Type.Array(ImportTheoremEnv),
+  candidates: Type.Array(ImportCandidate),
+  scannedFiles: Type.Array(Type.String()),
+  warnings: Type.Array(Type.String()),
+});
+
 export const ListDefinitionsQuery = Type.Object({
   q: Type.Optional(Type.String({ maxLength: 200 })),
   category: Type.Optional(Type.String({ maxLength: 64 })),
