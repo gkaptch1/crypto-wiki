@@ -27,6 +27,15 @@ export const MacroSetVisibility = Type.Union([
 
 export const RevisionStatus = Type.Union([Type.Literal('draft'), Type.Literal('published')]);
 
+export const Role = Type.Union([
+  Type.Literal('admin'),
+  Type.Literal('editor'),
+  Type.Literal('viewer'),
+]);
+
+/** Roles an invitation can grant (inviting a "viewer" would be a no-op). */
+export const InvitableRole = Type.Union([Type.Literal('admin'), Type.Literal('editor')]);
+
 /** MacroSet UUID, optionally pinned to a content snapshot: "<uuid>" or "<uuid>@<sha256-prefix>". */
 export const MacroSetRef = Type.String({
   pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(@[0-9a-f]{12,64})?$',
@@ -58,18 +67,56 @@ export const ApiError = Type.Object({
 });
 
 /**
- * Public serialization of a macro set. `createdAt`/`updatedAt` are ALWAYS
- * omitted for anonymous sets (timestamps can correlate with a submission date).
- * Never includes an owner (Phase 2) or the internal numeric id.
+ * Public serialization of a macro set. For anonymous sets, `owner`,
+ * `createdAt` and `updatedAt` are ALWAYS omitted (attribution and timestamps
+ * can deanonymize a double-blind submission). Never includes the owner's
+ * id/email or the internal numeric id for any visibility.
  */
 export const MacroSetPublic = Type.Object({
   uuid: Uuid,
   name: Type.String(),
   macros: MacroMap,
   visibility: MacroSetVisibility,
+  /** Owner display name; null for pre-auth sets, omitted for anonymous ones. */
+  owner: Type.Optional(Type.Union([Type.String(), Type.Null()])),
   createdAt: Type.Optional(Type.String()),
   updatedAt: Type.Optional(Type.String()),
+  /**
+   * Whether the requesting session may modify this set (owner or admin).
+   * Purely a UI hint, computed per request — enforcement is server-side.
+   */
+  canEdit: Type.Optional(Type.Boolean()),
 });
+
+/** A macro set as its owner sees it ("my macro sets"); timestamps always present. */
+export const MacroSetOwned = Type.Object({
+  uuid: Uuid,
+  name: Type.String(),
+  macros: MacroMap,
+  visibility: MacroSetVisibility,
+  snapshotCount: Type.Integer(),
+  createdAt: Type.String(),
+  updatedAt: Type.String(),
+});
+
+export const SessionUserInfo = Type.Object({
+  id: Type.String(),
+  name: Type.String(),
+  email: Type.String(),
+  image: Type.Union([Type.String(), Type.Null()]),
+  role: Role,
+});
+
+export const Invitation = Type.Object({
+  id: Type.Integer(),
+  email: Type.String(),
+  role: InvitableRole,
+  createdAt: Type.String(),
+  invitedBy: Type.Union([Type.String(), Type.Null()]),
+  acceptedAt: Type.Union([Type.String(), Type.Null()]),
+});
+
+export const InvitationList = Type.Array(Invitation);
 
 export const MacroSetPin = Type.Object({
   uuid: Uuid,
@@ -230,6 +277,12 @@ export const UpdateMacroSetBody = Type.Object({
 export const ForkMacroSetBody = Type.Object({
   name: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   visibility: Type.Optional(MacroSetVisibility),
+});
+
+export const CreateInvitationBody = Type.Object({
+  // a light shape check, not RFC 5322 (format: 'email' needs ajv-formats)
+  email: Type.String({ pattern: '^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$', maxLength: 320 }),
+  role: Type.Optional(InvitableRole),
 });
 
 export const ListDefinitionsQuery = Type.Object({

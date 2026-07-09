@@ -16,6 +16,8 @@ export class ApiRequestError extends Error {
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BACKEND_URL}${path}`, {
+    // the better-auth session cookie must ride along on cross-origin calls
+    credentials: 'include',
     ...init,
     headers: {
       ...(init?.body ? { 'Content-Type': 'application/json' } : {}),

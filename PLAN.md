@@ -177,14 +177,36 @@ Markdown-as-definition-body (see body format above).
   - Macro-set manager: CRUD, fork, pin (shows citable ref), visibility selector,
     open-by-UUID for unlisted/anonymous sets.
 
-### Phase 2 — Accounts & invited write
-- [ ] better-auth with Google + GitHub, cookie sessions.
-- [ ] Roles + invitation flow (admin invites email → editor on first sign-in).
-- [ ] Ownership: authors on definitions/formulations/revisions; owners on macro sets.
-- [ ] "My macro sets" page; **anonymous/unlisted visibility + de-anonymize toggle**;
-      audit that no public response ever serializes owner or timestamps for anonymous
-      sets and that no endpoint enumerates them.
-- [ ] Publish (freeze) workflow in the editor.
+### Phase 2 — Accounts & invited write — ✅ DONE (2026-07-09)
+- [x] better-auth (v1.6, Prisma adapter) with Google + GitHub, cookie sessions.
+      Mounted on Fastify via a Web-Request bridge (`backend/src/routes/auth.ts`);
+      config in `backend/src/lib/auth.ts`. Providers enable only when their env
+      credentials exist (`GOOGLE_/GITHUB_CLIENT_ID/SECRET` — **still to be created**
+      in Google Cloud console / GitHub developer settings). Dev/test fallback:
+      email+password strategy behind `AUTH_PASSWORD_SIGNIN=1` (never in prod);
+      the /signin page shows the dev form only under `import.meta.env.DEV`.
+- [x] Roles + invitation flow: `Role` enum on User (admin/editor/viewer); role
+      assigned once in better-auth's `user.create` hook — `ADMIN_EMAILS` env
+      bootstrap → invitation lookup → viewer. Admin-only `/invitations` CRUD;
+      inviting an existing account applies the role immediately (upgrade only,
+      never demotes). Frontend /admin page.
+- [x] Ownership: `createdById` on Definition/Formulation, `authorId` on Revision,
+      `ownerId` on MacroSet (all nullable; pre-auth rows are admin-managed).
+      Wiki writes need editor; draft reads (editor GET surface) too. Macro-set
+      create/fork needs any sign-in; update/delete is owner-or-admin. **Pin stays
+      public** (the "copy citable permalink" flow must work signed-out) — accepted
+      trade-off: a drive-by pin can block deletion of a public set.
+- [x] "My macro sets" (`GET /me/macro-sets`, owner-scoped, all visibilities,
+      timestamps included) + section on /macros. De-anonymize = PATCH visibility;
+      uuid (and thus all links) unchanged. Public serializations attribute by
+      display name only; anonymous sets carry no owner AND no timestamps anywhere.
+      The audit is `backend/test/anonymous-audit.test.ts` (substring-scans every
+      public surface that can carry a macro set, incl. permalink pages).
+- [x] Publish (freeze) workflow: editor-gated publish button + explicit
+      "frozen forever" confirm dialog; API already enforced immutability.
+- Gotcha fixed en route: `@fastify/cors` only allows GET/HEAD/POST unless
+  `methods` is explicit — cross-origin PATCH (editor save) was silently blocked;
+  now pinned + regression-tested.
 
 ### Phase 3 — Production rendering + paper-linking polish
 - [ ] Productionize Tier 2 in its revised roles: sandboxed render container, on-demand
@@ -196,6 +218,13 @@ Markdown-as-definition-body (see body format above).
 - [ ] Cross-links between definitions in commentary (`[[commitment-scheme]]` style).
 - [ ] Deploy: Compose stack on university VM, Caddy/nginx + TLS, backups, minimal CI
       (typecheck, lint, tests on GitHub Actions).
+
+### Phase 3+ — small follow-ups
+- [ ] **Send invitation emails.** Today an invitation just sits in the DB and the
+      role applies on first sign-in; the admin UI says to notify people out of band.
+      Wire better-auth's mailer to the university SMTP relay (the same relay the
+      "email magic links" fallback in the Auth section would use) so `POST
+      /invitations` also sends a "you've been invited, sign in here" email.
 
 ### Phase 4 — Import from papers
 - [ ] **Deterministic importer**: paste a paper's LaTeX source → extract `\newcommand`s

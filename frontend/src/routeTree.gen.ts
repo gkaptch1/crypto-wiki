@@ -9,6 +9,8 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as SigninRouteImport } from './routes/signin'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as WikiIndexRouteImport } from './routes/wiki/index'
 import { Route as MacrosIndexRouteImport } from './routes/macros/index'
@@ -18,6 +20,16 @@ import { Route as EditorDefSlugRouteImport } from './routes/editor/$defSlug'
 import { Route as DefDefSlugRouteImport } from './routes/def.$defSlug'
 import { Route as DefDefSlugFormulationRefRouteImport } from './routes/def.$defSlug_.$formulationRef'
 
+const SigninRoute = SigninRouteImport.update({
+  id: '/signin',
+  path: '/signin',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -62,6 +74,8 @@ const DefDefSlugFormulationRefRoute =
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
+  '/signin': typeof SigninRoute
   '/def/$defSlug': typeof DefDefSlugRoute
   '/editor/$defSlug': typeof EditorDefSlugRoute
   '/macros/$uuid': typeof MacrosUuidRoute
@@ -72,6 +86,8 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
+  '/signin': typeof SigninRoute
   '/def/$defSlug': typeof DefDefSlugRoute
   '/editor/$defSlug': typeof EditorDefSlugRoute
   '/macros/$uuid': typeof MacrosUuidRoute
@@ -83,6 +99,8 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
+  '/signin': typeof SigninRoute
   '/def/$defSlug': typeof DefDefSlugRoute
   '/editor/$defSlug': typeof EditorDefSlugRoute
   '/macros/$uuid': typeof MacrosUuidRoute
@@ -95,6 +113,8 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/admin'
+    | '/signin'
     | '/def/$defSlug'
     | '/editor/$defSlug'
     | '/macros/$uuid'
@@ -105,6 +125,8 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/admin'
+    | '/signin'
     | '/def/$defSlug'
     | '/editor/$defSlug'
     | '/macros/$uuid'
@@ -115,6 +137,8 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/admin'
+    | '/signin'
     | '/def/$defSlug'
     | '/editor/$defSlug'
     | '/macros/$uuid'
@@ -126,6 +150,8 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
+  SigninRoute: typeof SigninRoute
   DefDefSlugRoute: typeof DefDefSlugRoute
   EditorDefSlugRoute: typeof EditorDefSlugRoute
   MacrosUuidRoute: typeof MacrosUuidRoute
@@ -137,6 +163,20 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/signin': {
+      id: '/signin'
+      path: '/signin'
+      fullPath: '/signin'
+      preLoaderRoute: typeof SigninRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -198,6 +238,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
+  SigninRoute: SigninRoute,
   DefDefSlugRoute: DefDefSlugRoute,
   EditorDefSlugRoute: EditorDefSlugRoute,
   MacrosUuidRoute: MacrosUuidRoute,

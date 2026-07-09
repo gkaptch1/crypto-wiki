@@ -5,6 +5,7 @@ import { prisma } from '../lib/prisma';
 import { sendError } from '../lib/errors';
 import { macroHash } from '../lib/hash';
 import { serializeMacroSet } from '../lib/serialize';
+import { getSessionUser, requireSignIn, type SessionUser } from '../lib/session';
 import type { AppInstance } from '../app';
 
 const UuidParams = Type.Object({
@@ -13,10 +14,21 @@ const UuidParams = Type.Object({
   }),
 });
 
-// Macro-set CRUD. Visibility rules that must survive into Phase 2 unchanged:
+const AUTH_ERRORS = { 401: schemas.ApiError, 403: schemas.ApiError };
+
+// only the owner (or an admin) may modify a set; pre-auth sets have no owner
+// and are admin-managed
+function canManage(user: SessionUser, set: { ownerId: string | null }) {
+  return user.role === 'admin' || (set.ownerId !== null && set.ownerId === user.id);
+}
+
+const ownerName = { owner: { select: { name: true } } } as const;
+
+// Macro-set CRUD. Visibility rules (audited by test/anonymous-audit.test.ts):
 //  - only `public` sets are ever enumerated; unlisted/anonymous are link-only
-//  - anonymous sets are serialized without timestamps (serializeMacroSet)
+//  - anonymous sets are serialized without owner OR timestamps (serializeMacroSet)
 //  - the response schemas hard-strip anything a serializer might leak
+//  - de-anonymize = PATCH visibility; the uuid never changes, so links keep working
 export async function macroSetRoutes(app: AppInstance) {
   app.get(
     '/macro-sets',
@@ -25,6 +37,7 @@ export async function macroSetRoutes(app: AppInstance) {
       const sets = await prisma.macroSet.findMany({
         where: { visibility: 'public' },
         orderBy: { name: 'asc' },
+        include: ownerName,
       });
       return sets.map(serializeMacroSet);
     },
@@ -39,25 +52,37 @@ export async function macroSetRoutes(app: AppInstance) {
       },
     },
     async (request, reply) => {
-      const set = await prisma.macroSet.findUnique({ where: { uuid: request.params.uuid } });
+      const set = await prisma.macroSet.findUnique({
+        where: { uuid: request.params.uuid },
+        include: ownerName,
+      });
       if (!set) {
         return sendError(reply, 404, 'MACRO_SET_NOT_FOUND', `Macro set ${request.params.uuid} not found.`);
       }
-      return serializeMacroSet(set);
+      // canEdit is a per-requester UI hint (owner/admin); it never identifies
+      // the owner to anyone else, so it is safe on anonymous sets too
+      const user = await getSessionUser(request);
+      return { ...serializeMacroSet(set), canEdit: user !== null && canManage(user, set) };
     },
   );
 
+  // any signed-in user can create macro sets (their own notation is the whole
+  // point); wiki content is what needs the invited editor role
   app.post(
     '/macro-sets',
     {
+      preHandler: requireSignIn,
       schema: {
         body: schemas.CreateMacroSetBody,
-        response: { 201: schemas.MacroSetPublic },
+        response: { 201: schemas.MacroSetPublic, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
       const { name, macros, visibility = 'public' } = request.body;
-      const set = await prisma.macroSet.create({ data: { name, macros, visibility } });
+      const set = await prisma.macroSet.create({
+        data: { name, macros, visibility, ownerId: request.sessionUser!.id },
+        include: ownerName,
+      });
       return reply.code(201).send(serializeMacroSet(set));
     },
   );
@@ -65,39 +90,42 @@ export async function macroSetRoutes(app: AppInstance) {
   app.patch(
     '/macro-sets/:uuid',
     {
+      preHandler: requireSignIn,
       schema: {
         params: UuidParams,
         body: schemas.UpdateMacroSetBody,
-        response: { 200: schemas.MacroSetPublic, 404: schemas.ApiError },
+        response: { 200: schemas.MacroSetPublic, 404: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
-      const { name, macros, visibility } = request.body;
-      try {
-        const set = await prisma.macroSet.update({
-          where: { uuid: request.params.uuid },
-          data: {
-            ...(name !== undefined ? { name } : {}),
-            ...(macros !== undefined ? { macros } : {}),
-            ...(visibility !== undefined ? { visibility } : {}),
-          },
-        });
-        return serializeMacroSet(set);
-      } catch (err) {
-        if ((err as { code?: string }).code === 'P2025') {
-          return sendError(reply, 404, 'MACRO_SET_NOT_FOUND', `Macro set ${request.params.uuid} not found.`);
-        }
-        throw err;
+      const existing = await prisma.macroSet.findUnique({ where: { uuid: request.params.uuid } });
+      if (!existing) {
+        return sendError(reply, 404, 'MACRO_SET_NOT_FOUND', `Macro set ${request.params.uuid} not found.`);
       }
+      if (!canManage(request.sessionUser!, existing)) {
+        return sendError(reply, 403, 'NOT_OWNER', 'Only the owner of a macro set can modify it.');
+      }
+      const { name, macros, visibility } = request.body;
+      const set = await prisma.macroSet.update({
+        where: { id: existing.id },
+        data: {
+          ...(name !== undefined ? { name } : {}),
+          ...(macros !== undefined ? { macros } : {}),
+          ...(visibility !== undefined ? { visibility } : {}),
+        },
+        include: ownerName,
+      });
+      return serializeMacroSet(set);
     },
   );
 
   app.delete(
     '/macro-sets/:uuid',
     {
+      preHandler: requireSignIn,
       schema: {
         params: UuidParams,
-        response: { 204: Type.Null(), 404: schemas.ApiError, 409: schemas.ApiError },
+        response: { 204: Type.Null(), 404: schemas.ApiError, 409: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
@@ -107,6 +135,9 @@ export async function macroSetRoutes(app: AppInstance) {
       });
       if (!set) {
         return sendError(reply, 404, 'MACRO_SET_NOT_FOUND', `Macro set ${request.params.uuid} not found.`);
+      }
+      if (!canManage(request.sessionUser!, set)) {
+        return sendError(reply, 403, 'NOT_OWNER', 'Only the owner of a macro set can delete it.');
       }
       if (set._count.snapshots > 0) {
         return sendError(
@@ -123,6 +154,8 @@ export async function macroSetRoutes(app: AppInstance) {
 
   // Freeze the current content as an immutable snapshot and return the
   // ?macros= ref papers should cite. Idempotent: same content → same hash.
+  // Deliberately public: "copy citable permalink" on the definition page must
+  // work for signed-out readers.
   app.post(
     '/macro-sets/:uuid/pin',
     {
@@ -153,10 +186,11 @@ export async function macroSetRoutes(app: AppInstance) {
   app.post(
     '/macro-sets/:uuid/fork',
     {
+      preHandler: requireSignIn,
       schema: {
         params: UuidParams,
         body: schemas.ForkMacroSetBody,
-        response: { 201: schemas.MacroSetPublic, 404: schemas.ApiError },
+        response: { 201: schemas.MacroSetPublic, 404: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
@@ -169,7 +203,9 @@ export async function macroSetRoutes(app: AppInstance) {
           name: request.body.name ?? `${source.name} (fork)`,
           macros: source.macros as MacroMap,
           visibility: request.body.visibility ?? 'unlisted',
+          ownerId: request.sessionUser!.id,
         },
+        include: ownerName,
       });
       return reply.code(201).send(serializeMacroSet(fork));
     },

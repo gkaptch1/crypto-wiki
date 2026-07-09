@@ -7,6 +7,106 @@ datasource db {
   provider = "postgresql"
 }
 
+// ---------------------------------------------------------------------------
+// Auth (Phase 2) — User/Session/Account/Verification are better-auth's core
+// tables (shapes fixed by better-auth; extra columns like `role` are declared
+// as additionalFields in src/lib/auth.ts)
+// ---------------------------------------------------------------------------
+
+enum Role {
+  admin
+  editor // invited; can write wiki content
+  viewer // default; read needs no login
+}
+
+model User {
+  id            String  @id
+  name          String
+  email         String  @unique
+  emailVerified Boolean @default(false)
+  image         String?
+  role          Role    @default(viewer)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions Session[]
+  accounts Account[]
+
+  macroSets           MacroSet[]
+  definitionsCreated  Definition[]
+  formulationsCreated Formulation[]
+  revisionsAuthored   Revision[]
+  invitationsSent     Invitation[]  @relation("InvitationsSent")
+  invitationAccepted  Invitation?   @relation("InvitationAccepted")
+}
+
+model Session {
+  id        String   @id
+  token     String   @unique
+  expiresAt DateTime
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@index([userId])
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([identifier])
+}
+
+// admin invites an email; on first OAuth sign-in with that email the account
+// gets the invited role (default editor)
+model Invitation {
+  id    Int    @id @default(autoincrement())
+  email String @unique // stored lowercased
+  role  Role   @default(editor)
+
+  createdAt DateTime @default(now())
+
+  invitedBy   User?   @relation("InvitationsSent", fields: [invitedById], references: [id], onDelete: SetNull)
+  invitedById String?
+
+  acceptedAt   DateTime?
+  acceptedBy   User?     @relation("InvitationAccepted", fields: [acceptedById], references: [id], onDelete: SetNull)
+  acceptedById String?   @unique
+}
+
 // high-level concept of a definition (e.g. PRF); holds no LaTeX itself
 model Definition {
   id    Int    @id @default(autoincrement())
@@ -15,6 +115,10 @@ model Definition {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  // nullable: pre-auth content has no recorded author
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdById String?
 
   formulations Formulation[]
   categories   Category[]
@@ -44,6 +148,9 @@ model Formulation {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdById String?
 
   definition   Definition @relation(fields: [definitionId], references: [id])
   definitionId Int
@@ -75,6 +182,9 @@ model Revision {
   updatedAt   DateTime  @updatedAt
   publishedAt DateTime?
 
+  author   User?   @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  authorId String?
+
   formulation   Formulation @relation(fields: [formulationId], references: [id])
   formulationId Int
 
@@ -93,6 +203,11 @@ model MacroSet {
   name       String
   macros     Json
   visibility MacroSetVisibility @default(public)
+
+  // nullable: pre-auth sets have no owner (manageable by admins only).
+  // NEVER serialized publicly for anonymous sets — see lib/serialize.ts.
+  owner   User?   @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  ownerId String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

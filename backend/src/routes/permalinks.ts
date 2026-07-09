@@ -81,7 +81,7 @@ async function resolvePage(
       formulations: {
         orderBy: { order: 'asc' },
         include: {
-          defaultMacroSet: true,
+          defaultMacroSet: { include: { owner: { select: { name: true } } } },
           revisions: {
             where: { status: 'published' },
             orderBy: { number: 'desc' },
@@ -150,9 +150,10 @@ async function resolvePage(
     }
     const set = await prisma.macroSet.findUnique({
       where: { uuid: parts.uuid },
-      include: parts.hash
-        ? { snapshots: { where: { hash: { startsWith: parts.hash } } } }
-        : undefined,
+      include: {
+        owner: { select: { name: true } },
+        ...(parts.hash ? { snapshots: { where: { hash: { startsWith: parts.hash } } } } : {}),
+      },
     });
     if (!set) {
       return sendError(reply, 404, 'MACRO_SET_NOT_FOUND', `Macro set ${parts.uuid} not found.`);

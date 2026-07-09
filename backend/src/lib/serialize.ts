@@ -4,6 +4,7 @@ import type {
   FormulationEditor,
   FormulationMeta,
   MacroMap,
+  MacroSetOwned,
   MacroSetPublic,
   Revision as RevisionDto,
 } from '@crypto-wiki/shared';
@@ -14,10 +15,14 @@ import type {
   Revision,
 } from '../../generated/prisma/client';
 
-// Anonymous sets get zero public attribution: no owner (none exists yet, but
-// Phase 2 must keep it that way) and no timestamps, since a createdAt can
-// correlate with a submission date.
-export function serializeMacroSet(set: MacroSet): MacroSetPublic {
+/** Callers that want owner attribution must `include: { owner: { select: { name: true } } }`. */
+export type MacroSetWithOwner = MacroSet & { owner?: { name: string } | null };
+
+// Anonymous sets get ZERO public attribution: no owner and no timestamps
+// (either can deanonymize a double-blind submission — a createdAt correlates
+// with a submission date). Public/unlisted sets are attributed by display
+// name only; the owner's id/email never leaves the server.
+export function serializeMacroSet(set: MacroSetWithOwner): MacroSetPublic {
   const base: MacroSetPublic = {
     uuid: set.uuid,
     name: set.name,
@@ -27,6 +32,23 @@ export function serializeMacroSet(set: MacroSet): MacroSetPublic {
   if (set.visibility === 'anonymous') return base;
   return {
     ...base,
+    owner: set.owner?.name ?? null,
+    createdAt: set.createdAt.toISOString(),
+    updatedAt: set.updatedAt.toISOString(),
+  };
+}
+
+// The owner's own view ("my macro sets") — authenticated and owner-scoped,
+// so timestamps are safe to include even for anonymous sets.
+export function serializeMacroSetOwned(
+  set: MacroSet & { _count: { snapshots: number } },
+): MacroSetOwned {
+  return {
+    uuid: set.uuid,
+    name: set.name,
+    macros: set.macros as MacroMap,
+    visibility: set.visibility,
+    snapshotCount: set._count.snapshots,
     createdAt: set.createdAt.toISOString(),
     updatedAt: set.updatedAt.toISOString(),
   };

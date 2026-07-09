@@ -7,8 +7,15 @@ export type MacroSetVisibility = Static<typeof S.MacroSetVisibility>;
 export type RevisionStatus = Static<typeof S.RevisionStatus>;
 export type Citation = Static<typeof S.Citation>;
 
+export type Role = Static<typeof S.Role>;
+export type InvitableRole = Static<typeof S.InvitableRole>;
+
 export type ApiError = Static<typeof S.ApiError>;
 export type MacroSetPublic = Static<typeof S.MacroSetPublic>;
+export type MacroSetOwned = Static<typeof S.MacroSetOwned>;
+export type SessionUserInfo = Static<typeof S.SessionUserInfo>;
+export type Invitation = Static<typeof S.Invitation>;
+export type CreateInvitationBody = Static<typeof S.CreateInvitationBody>;
 export type MacroSetPin = Static<typeof S.MacroSetPin>;
 export type FormulationMeta = Static<typeof S.FormulationMeta>;
 export type RevisionMeta = Static<typeof S.RevisionMeta>;

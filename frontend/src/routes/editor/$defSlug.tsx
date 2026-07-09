@@ -16,9 +16,14 @@ import {
 } from '../../api/definitions';
 import { ApiRequestError } from '../../api/client';
 import LatexView from '../../components/LatexView';
+import RequireEditor from '../../components/RequireEditor';
 
 export const Route = createFileRoute('/editor/$defSlug')({
-  component: EditorPage,
+  component: () => (
+    <RequireEditor>
+      <EditorPage />
+    </RequireEditor>
+  ),
 });
 
 function errMsg(err: unknown): string {
@@ -456,10 +461,18 @@ function RevisionEditor({
             <button
               className="bg-black text-white rounded px-2.5 py-1 disabled:opacity-50"
               disabled={publish.isPending}
-              onClick={() => publish.mutate()}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    'Publish this revision?\n\nPublished revisions are FROZEN FOREVER: the LaTeX body becomes immutable, gets a revision number (r1, r2, …), and papers can cite its permalink. Fixing anything later means publishing a new revision.',
+                  )
+                ) {
+                  publish.mutate();
+                }
+              }}
               title="Publishing freezes this revision forever and assigns it a number"
             >
-              Publish
+              Publish…
             </button>
             <button
               className="text-red-600 border border-gray-300 rounded px-2.5 py-1 hover:border-red-600"

@@ -1,36 +1,38 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { makeApp, publishDefinition, resetDb } from './helpers';
+import { authedInject, makeApp, publishDefinition, resetDb, signUp, type TestApp } from './helpers';
 import { prisma } from '../src/lib/prisma';
 
-let app: Awaited<ReturnType<typeof makeApp>>;
+let app: TestApp;
+let inject: TestApp['inject'];
 
 beforeAll(async () => {
   await resetDb();
   app = await makeApp();
+  inject = authedInject(app, (await signUp(app, { role: 'editor' })).cookie);
 
-  await publishDefinition(app, { slug: 'prf', title: 'Pseudorandom Function', fSlug: 'standard', body: 'PRF r1 body.' });
+  await publishDefinition(inject, { slug: 'prf', title: 'Pseudorandom Function', fSlug: 'standard', body: 'PRF r1 body.' });
   // publish an r2 on the same formulation
-  const draft = await app.inject({
+  const draft = await inject({
     method: 'POST',
     url: '/definitions/prf/formulations/standard/revisions',
     payload: { bodyLatex: 'PRF r2 body.' },
   });
-  await app.inject({
+  await inject({
     method: 'POST',
     url: `/definitions/prf/formulations/standard/revisions/${draft.json().id}/publish`,
   });
   // a second, non-default formulation with one published revision
-  await app.inject({
+  await inject({
     method: 'POST',
     url: '/definitions/prf/formulations',
     payload: { slug: 'concrete' },
   });
-  const cDraft = await app.inject({
+  const cDraft = await inject({
     method: 'POST',
     url: '/definitions/prf/formulations/concrete/revisions',
     payload: { bodyLatex: 'PRF concrete body.' },
   });
-  await app.inject({
+  await inject({
     method: 'POST',
     url: `/definitions/prf/formulations/concrete/revisions/${cDraft.json().id}/publish`,
   });
@@ -43,7 +45,7 @@ afterAll(async () => {
 
 describe('permalink resolution', () => {
   it('/def/:slug returns the default formulation at its latest published revision', async () => {
-    const res = await app.inject({ method: 'GET', url: '/def/prf' });
+    const res = await inject({ method: 'GET', url: '/def/prf' });
     expect(res.statusCode).toBe(200);
     const page = res.json();
     expect(page.formulation.slug).toBe('standard');
@@ -55,13 +57,13 @@ describe('permalink resolution', () => {
   });
 
   it('/def/:slug/:formulation selects that formulation', async () => {
-    const res = await app.inject({ method: 'GET', url: '/def/prf/concrete' });
+    const res = await inject({ method: 'GET', url: '/def/prf/concrete' });
     expect(res.statusCode).toBe(200);
     expect(res.json().revision.bodyLatex).toBe('PRF concrete body.');
   });
 
   it('/def/:slug/:formulation@rN pins a revision immutably', async () => {
-    const res = await app.inject({ method: 'GET', url: '/def/prf/standard@r1' });
+    const res = await inject({ method: 'GET', url: '/def/prf/standard@r1' });
     expect(res.statusCode).toBe(200);
     expect(res.json().revision.number).toBe(1);
     expect(res.json().revision.pinned).toBe(true);
@@ -69,45 +71,45 @@ describe('permalink resolution', () => {
   });
 
   it('missing pieces 404 with specific codes', async () => {
-    const noDef = await app.inject({ method: 'GET', url: '/def/nope' });
+    const noDef = await inject({ method: 'GET', url: '/def/nope' });
     expect(noDef.json().code).toBe('DEFINITION_NOT_FOUND');
 
-    const noForm = await app.inject({ method: 'GET', url: '/def/prf/nope' });
+    const noForm = await inject({ method: 'GET', url: '/def/prf/nope' });
     expect(noForm.json().code).toBe('FORMULATION_NOT_FOUND');
 
-    const noRev = await app.inject({ method: 'GET', url: '/def/prf/standard@r99' });
+    const noRev = await inject({ method: 'GET', url: '/def/prf/standard@r99' });
     expect(noRev.json().code).toBe('REVISION_NOT_FOUND');
   });
 
   it('rejects malformed formulation refs', async () => {
-    const res = await app.inject({ method: 'GET', url: '/def/prf/standard@rev2' });
+    const res = await inject({ method: 'GET', url: '/def/prf/standard@rev2' });
     expect(res.statusCode).toBe(400);
     expect(res.json().code).toBe('BAD_FORMULATION_REF');
   });
 
   it('falls back to a published formulation when the default has none', async () => {
     // new definition: default formulation stays draft, second formulation published
-    await app.inject({
+    await inject({
       method: 'POST',
       url: '/definitions',
       payload: { slug: 'owf', title: 'One-Way Function', formulation: { slug: 'main', bodyLatex: 'draft only' } },
     });
-    await app.inject({
+    await inject({
       method: 'POST',
       url: '/definitions/owf/formulations',
       payload: { slug: 'alt' },
     });
-    const draft = await app.inject({
+    const draft = await inject({
       method: 'POST',
       url: '/definitions/owf/formulations/alt/revisions',
       payload: { bodyLatex: 'OWF alt body.' },
     });
-    await app.inject({
+    await inject({
       method: 'POST',
       url: `/definitions/owf/formulations/alt/revisions/${draft.json().id}/publish`,
     });
 
-    const res = await app.inject({ method: 'GET', url: '/def/owf' });
+    const res = await inject({ method: 'GET', url: '/def/owf' });
     expect(res.statusCode).toBe(200);
     expect(res.json().formulation.slug).toBe('alt');
     // the draft-only formulation must not appear in the public tab list

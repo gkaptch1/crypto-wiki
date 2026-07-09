@@ -7,6 +7,7 @@ import {
   serializeDefinitionEditor,
   serializeRevision,
 } from '../lib/serialize';
+import { requireEditor } from '../lib/session';
 import type { AppInstance } from '../app';
 
 // Editor API: full CRUD over definitions / formulations / revisions,
@@ -14,6 +15,12 @@ import type { AppInstance } from '../app';
 // **published revisions are immutable** — no update, no delete, and nothing
 // that would break an existing permalink (definition/formulation slugs
 // freeze once anything under them is published).
+//
+// Access (Phase 2): the browse list and categories stay public; everything
+// else here — drafts included — is the editor surface and needs the invited
+// editor role. Public reads go through routes/permalinks.ts.
+
+const AUTH_ERRORS = { 401: schemas.ApiError, 403: schemas.ApiError };
 
 const DefParams = Type.Object({ defSlug: schemas.Slug });
 const FormulationParams = Type.Object({ defSlug: schemas.Slug, fSlug: schemas.Slug });
@@ -106,18 +113,21 @@ export async function definitionRoutes(app: AppInstance) {
   app.post(
     '/definitions',
     {
+      preHandler: requireEditor,
       schema: {
         body: schemas.CreateDefinitionBody,
-        response: { 201: schemas.DefinitionEditor, 409: schemas.ApiError },
+        response: { 201: schemas.DefinitionEditor, 409: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
       const { slug, title, categories = [], formulation } = request.body;
+      const userId = request.sessionUser!.id;
       try {
         const def = await prisma.definition.create({
           data: {
             slug,
             title,
+            createdById: userId,
             categories: {
               connectOrCreate: categories.map((name) => ({ where: { name }, create: { name } })),
             },
@@ -128,11 +138,13 @@ export async function definitionRoutes(app: AppInstance) {
                       slug: formulation.slug ?? 'default',
                       isDefault: true,
                       order: 0,
+                      createdById: userId,
                       ...citationData(formulation.citation),
                       revisions: {
                         create: {
                           bodyLatex: formulation.bodyLatex ?? '',
                           commentaryMd: formulation.commentaryMd ?? '',
+                          authorId: userId,
                         },
                       },
                     },
@@ -161,9 +173,10 @@ export async function definitionRoutes(app: AppInstance) {
   app.get(
     '/definitions/:defSlug',
     {
+      preHandler: requireEditor,
       schema: {
         params: DefParams,
-        response: { 200: schemas.DefinitionEditor, 404: schemas.ApiError },
+        response: { 200: schemas.DefinitionEditor, 404: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
@@ -182,10 +195,11 @@ export async function definitionRoutes(app: AppInstance) {
   app.patch(
     '/definitions/:defSlug',
     {
+      preHandler: requireEditor,
       schema: {
         params: DefParams,
         body: schemas.UpdateDefinitionBody,
-        response: { 200: schemas.DefinitionEditor, 404: schemas.ApiError, 409: schemas.ApiError },
+        response: { 200: schemas.DefinitionEditor, 404: schemas.ApiError, 409: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
@@ -226,9 +240,10 @@ export async function definitionRoutes(app: AppInstance) {
   app.delete(
     '/definitions/:defSlug',
     {
+      preHandler: requireEditor,
       schema: {
         params: DefParams,
-        response: { 204: Type.Null(), 404: schemas.ApiError, 409: schemas.ApiError },
+        response: { 204: Type.Null(), 404: schemas.ApiError, 409: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
@@ -263,6 +278,7 @@ export async function definitionRoutes(app: AppInstance) {
   app.post(
     '/definitions/:defSlug/formulations',
     {
+      preHandler: requireEditor,
       schema: {
         params: DefParams,
         body: schemas.CreateFormulationBody,
@@ -270,6 +286,7 @@ export async function definitionRoutes(app: AppInstance) {
           201: schemas.DefinitionEditor,
           404: schemas.ApiError,
           409: schemas.ApiError,
+          ...AUTH_ERRORS,
         },
       },
     },
@@ -313,6 +330,7 @@ export async function definitionRoutes(app: AppInstance) {
               isDefault: makeDefault,
               order: nextOrder,
               defaultMacroSetId: macroSetId,
+              createdById: request.sessionUser!.id,
               ...citationData(citation),
             },
           });
@@ -338,6 +356,7 @@ export async function definitionRoutes(app: AppInstance) {
   app.patch(
     '/definitions/:defSlug/formulations/:fSlug',
     {
+      preHandler: requireEditor,
       schema: {
         params: FormulationParams,
         body: schemas.UpdateFormulationBody,
@@ -345,6 +364,7 @@ export async function definitionRoutes(app: AppInstance) {
           200: schemas.DefinitionEditor,
           404: schemas.ApiError,
           409: schemas.ApiError,
+          ...AUTH_ERRORS,
         },
       },
     },
@@ -418,9 +438,10 @@ export async function definitionRoutes(app: AppInstance) {
   app.delete(
     '/definitions/:defSlug/formulations/:fSlug',
     {
+      preHandler: requireEditor,
       schema: {
         params: FormulationParams,
-        response: { 204: Type.Null(), 404: schemas.ApiError, 409: schemas.ApiError },
+        response: { 204: Type.Null(), 404: schemas.ApiError, 409: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
@@ -470,9 +491,10 @@ export async function definitionRoutes(app: AppInstance) {
   app.get(
     '/definitions/:defSlug/formulations/:fSlug/revisions',
     {
+      preHandler: requireEditor,
       schema: {
         params: FormulationParams,
-        response: { 200: Type.Array(schemas.Revision), 404: schemas.ApiError },
+        response: { 200: Type.Array(schemas.Revision), 404: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
@@ -492,10 +514,11 @@ export async function definitionRoutes(app: AppInstance) {
   app.post(
     '/definitions/:defSlug/formulations/:fSlug/revisions',
     {
+      preHandler: requireEditor,
       schema: {
         params: FormulationParams,
         body: schemas.CreateRevisionBody,
-        response: { 201: schemas.Revision, 404: schemas.ApiError },
+        response: { 201: schemas.Revision, 404: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
@@ -509,6 +532,7 @@ export async function definitionRoutes(app: AppInstance) {
           formulationId: formulation.id,
           bodyLatex: request.body.bodyLatex,
           commentaryMd: request.body.commentaryMd ?? '',
+          authorId: request.sessionUser!.id,
         },
       });
       return reply.code(201).send(serializeRevision(revision));
@@ -528,9 +552,10 @@ export async function definitionRoutes(app: AppInstance) {
   app.get(
     '/definitions/:defSlug/formulations/:fSlug/revisions/:revisionId',
     {
+      preHandler: requireEditor,
       schema: {
         params: RevisionParams,
-        response: { 200: schemas.Revision, 404: schemas.ApiError },
+        response: { 200: schemas.Revision, 404: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
@@ -546,10 +571,11 @@ export async function definitionRoutes(app: AppInstance) {
   app.patch(
     '/definitions/:defSlug/formulations/:fSlug/revisions/:revisionId',
     {
+      preHandler: requireEditor,
       schema: {
         params: RevisionParams,
         body: schemas.UpdateRevisionBody,
-        response: { 200: schemas.Revision, 404: schemas.ApiError, 409: schemas.ApiError },
+        response: { 200: schemas.Revision, 404: schemas.ApiError, 409: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
@@ -582,6 +608,7 @@ export async function definitionRoutes(app: AppInstance) {
   app.post(
     '/definitions/:defSlug/formulations/:fSlug/revisions/:revisionId/publish',
     {
+      preHandler: requireEditor,
       schema: {
         params: RevisionParams,
         response: {
@@ -589,6 +616,7 @@ export async function definitionRoutes(app: AppInstance) {
           404: schemas.ApiError,
           409: schemas.ApiError,
           422: schemas.ApiError,
+          ...AUTH_ERRORS,
         },
       },
     },
@@ -634,9 +662,10 @@ export async function definitionRoutes(app: AppInstance) {
   app.delete(
     '/definitions/:defSlug/formulations/:fSlug/revisions/:revisionId',
     {
+      preHandler: requireEditor,
       schema: {
         params: RevisionParams,
-        response: { 204: Type.Null(), 404: schemas.ApiError, 409: schemas.ApiError },
+        response: { 204: Type.Null(), 404: schemas.ApiError, 409: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {

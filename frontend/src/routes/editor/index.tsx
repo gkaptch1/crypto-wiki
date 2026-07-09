@@ -3,9 +3,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { createDefinition, getDefinitions } from '../../api/definitions';
 import { ApiRequestError } from '../../api/client';
+import RequireEditor from '../../components/RequireEditor';
 
 export const Route = createFileRoute('/editor/')({
-  component: EditorIndex,
+  component: () => (
+    <RequireEditor>
+      <EditorIndex />
+    </RequireEditor>
+  ),
 });
 
 function EditorIndex() {

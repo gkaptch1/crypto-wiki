@@ -10,6 +10,7 @@ import {
   updateMacroSet,
 } from '../../api/definitions';
 import { ApiRequestError } from '../../api/client';
+import { useAuth } from '../../lib/auth-client';
 
 export const Route = createFileRoute('/macros/$uuid')({
   component: MacroSetEditor,
@@ -28,6 +29,7 @@ function MacroSetEditor() {
   const { uuid } = Route.useParams();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { isSignedIn } = useAuth();
 
   const set = useQuery({ queryKey: ['macro-set', uuid], queryFn: () => getMacroSet(uuid) });
 
@@ -48,6 +50,7 @@ function MacroSetEditor() {
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['macro-set', uuid] });
     queryClient.invalidateQueries({ queryKey: ['macro-sets'] });
+    queryClient.invalidateQueries({ queryKey: ['my-macro-sets'] });
   };
 
   const save = useMutation({
@@ -91,24 +94,44 @@ function MacroSetEditor() {
   if (set.isPending) return <p className="text-gray-500">Loading…</p>;
   if (set.isError) return <p className="text-red-600">{errMsg(set.error)}</p>;
 
+  const canEdit = set.data.canEdit === true;
+
   return (
     <div className="max-w-3xl space-y-5">
       <div className="flex flex-wrap items-center gap-3">
-        <input
-          className="text-xl font-bold border-b border-transparent focus:border-gray-300 outline-none"
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-        />
-        <select
-          className="border border-gray-300 rounded px-2 py-1 text-sm"
-          value={visibility}
-          onChange={(e) => setVisibility(e.target.value as MacroSetVisibility)}
-        >
-          <option value="public">public — listed, attributed</option>
-          <option value="unlisted">unlisted — link-only</option>
-          <option value="anonymous">anonymous — link-only, no attribution (double-blind)</option>
-        </select>
+        {canEdit ? (
+          <>
+            <input
+              className="text-xl font-bold border-b border-transparent focus:border-gray-300 outline-none"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+            <select
+              className="border border-gray-300 rounded px-2 py-1 text-sm"
+              value={visibility}
+              onChange={(e) => setVisibility(e.target.value as MacroSetVisibility)}
+            >
+              <option value="public">public — listed, attributed</option>
+              <option value="unlisted">unlisted — link-only</option>
+              <option value="anonymous">anonymous — link-only, no attribution (double-blind)</option>
+            </select>
+          </>
+        ) : (
+          <>
+            <h1 className="text-xl font-bold">{set.data.name}</h1>
+            <span className="text-sm text-gray-500">
+              {set.data.visibility}
+              {set.data.owner ? ` · by ${set.data.owner}` : ''}
+            </span>
+          </>
+        )}
       </div>
+      {canEdit && visibility === 'anonymous' && (
+        <p className="text-xs text-gray-500">
+          Anonymous: the public page shows no owner and no timestamps. After acceptance, switch to
+          unlisted/public to de-anonymize — the UUID (and every link using it) stays the same.
+        </p>
+      )}
       <p className="text-xs text-gray-400 font-mono">?macros={uuid}</p>
 
       <table className="w-full text-sm">
@@ -124,9 +147,10 @@ function MacroSetEditor() {
             <tr key={i}>
               <td className="py-1 pr-2">
                 <input
-                  className="w-full border border-gray-300 rounded px-2 py-1 font-mono"
+                  className="w-full border border-gray-300 rounded px-2 py-1 font-mono disabled:border-transparent disabled:bg-transparent"
                   placeholder="\adv"
                   value={row.key}
+                  disabled={!canEdit}
                   onChange={(e) =>
                     setRows(rows.map((r, j) => (j === i ? { ...r, key: e.target.value } : r)))
                   }
@@ -134,32 +158,37 @@ function MacroSetEditor() {
               </td>
               <td className="py-1">
                 <input
-                  className="w-full border border-gray-300 rounded px-2 py-1 font-mono"
+                  className="w-full border border-gray-300 rounded px-2 py-1 font-mono disabled:border-transparent disabled:bg-transparent"
                   placeholder="\mathcal{A}"
                   value={row.value}
+                  disabled={!canEdit}
                   onChange={(e) =>
                     setRows(rows.map((r, j) => (j === i ? { ...r, value: e.target.value } : r)))
                   }
                 />
               </td>
               <td className="text-center">
-                <button
-                  className="text-gray-400 hover:text-red-600"
-                  onClick={() => setRows(rows.filter((_, j) => j !== i))}
-                >
-                  ✕
-                </button>
+                {canEdit && (
+                  <button
+                    className="text-gray-400 hover:text-red-600"
+                    onClick={() => setRows(rows.filter((_, j) => j !== i))}
+                  >
+                    ✕
+                  </button>
+                )}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-      <button
-        className="text-sm border border-gray-300 rounded px-2.5 py-1 hover:border-black"
-        onClick={() => setRows([...rows, { key: '', value: '' }])}
-      >
-        + macro
-      </button>
+      {canEdit && (
+        <button
+          className="text-sm border border-gray-300 rounded px-2.5 py-1 hover:border-black"
+          onClick={() => setRows([...rows, { key: '', value: '' }])}
+        >
+          + macro
+        </button>
+      )}
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       {pinnedRef && (
@@ -175,17 +204,19 @@ function MacroSetEditor() {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 text-sm">
-        <button
-          className="bg-black text-white rounded px-4 py-2 disabled:opacity-50"
-          disabled={save.isPending}
-          onClick={() => {
-            setError(null);
-            save.mutate();
-          }}
-        >
-          Save
-        </button>
+      <div className="flex flex-wrap items-center gap-2 text-sm">
+        {canEdit && (
+          <button
+            className="bg-black text-white rounded px-4 py-2 disabled:opacity-50"
+            disabled={save.isPending}
+            onClick={() => {
+              setError(null);
+              save.mutate();
+            }}
+          >
+            Save
+          </button>
+        )}
         <button
           className="border border-gray-300 rounded px-3 py-2 hover:border-black"
           onClick={() => pin.mutate()}
@@ -193,18 +224,28 @@ function MacroSetEditor() {
         >
           Pin current content
         </button>
-        <button
-          className="border border-gray-300 rounded px-3 py-2 hover:border-black"
-          onClick={() => fork.mutate()}
-        >
-          Fork
-        </button>
-        <button
-          className="border border-gray-300 rounded px-3 py-2 text-red-600 hover:border-red-600"
-          onClick={() => remove.mutate()}
-        >
-          Delete
-        </button>
+        {isSignedIn && (
+          <button
+            className="border border-gray-300 rounded px-3 py-2 hover:border-black"
+            onClick={() => fork.mutate()}
+            title="Copy these macros into a new set you own"
+          >
+            Fork
+          </button>
+        )}
+        {canEdit && (
+          <button
+            className="border border-gray-300 rounded px-3 py-2 text-red-600 hover:border-red-600"
+            onClick={() => remove.mutate()}
+          >
+            Delete
+          </button>
+        )}
+        {!canEdit && (
+          <span className="text-gray-500">
+            Read-only{isSignedIn ? '' : ' — sign in to fork'}.
+          </span>
+        )}
       </div>
     </div>
   );

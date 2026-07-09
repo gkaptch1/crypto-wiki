@@ -3,15 +3,19 @@ import type {
   CategoryList,
   CreateDefinitionBody,
   CreateFormulationBody,
+  CreateInvitationBody,
   CreateMacroSetBody,
   CreateRevisionBody,
   DefinitionEditor,
   DefinitionListItem,
   DefinitionPage,
   ForkMacroSetBody,
+  Invitation,
+  MacroSetOwned,
   MacroSetPin,
   MacroSetPublic,
   Revision,
+  SessionUserInfo,
   UpdateDefinitionBody,
   UpdateFormulationBody,
   UpdateMacroSetBody,
@@ -107,3 +111,18 @@ export const pinMacroSet = (uuid: string) => api<MacroSetPin>(`/macro-sets/${uui
 
 export const forkMacroSet = (uuid: string, body: ForkMacroSetBody = {}) =>
   api<MacroSetPublic>(`/macro-sets/${uuid}/fork`, post(body));
+
+// -------------------------------------------------------- session-scoped (me)
+
+export const getMe = () => api<SessionUserInfo>('/me');
+
+export const getMyMacroSets = () => api<MacroSetOwned[]>('/me/macro-sets');
+
+// ------------------------------------------------------- invitations (admin)
+
+export const getInvitations = () => api<Invitation[]>('/invitations');
+
+export const createInvitation = (body: CreateInvitationBody) =>
+  api<Invitation>('/invitations', post(body));
+
+export const deleteInvitation = (id: number) => api<void>(`/invitations/${id}`, del());
