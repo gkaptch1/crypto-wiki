@@ -27,6 +27,24 @@ description: Build, launch, and drive crypto-wiki end-to-end (backend API + fron
   /def/euf-cma (cryptocode `\procedure` box via the shim), editor live preview
   (fill textarea → preview updates), macro pin flow (green "Citable ref" box),
   /def/nonexistent (red error card, not a crash).
+- **Importer** (/import, editor-gated): paste a mini paper (\documentclass +
+  \newtheorem{definition} + a definition env) → Scan → candidates with shim
+  previews; check one, fill title/slug (titles are globally UNIQUE — suffix a
+  run id or reruns 409), Import → "Imported as draft". arXiv path: enter
+  2402.09370 → 30 candidates. Per-macro rows classify registered→shared /
+  else→local; renaming to a registered name (e.g. \encode) flips the badge
+  and rewrites the body.
+- **Layered macros**: import/publish a def with a shared symbol + a local
+  macro; apply a notation set restyling the shared name → page shows the
+  restyle, local stays sealed; POST /macro-sets with an unregistered name →
+  422 UNREGISTERED_NAMES.
+
+## Auth for drives
+- Sign in via the /signin dev password form. Mint a throwaway editor:
+  sign-up via POST /api/auth/sign-up/email, then
+  `psql -d cryptowiki -c "UPDATE \"User\" SET role='editor' WHERE email='...'"`.
+- Node-side API probes: node fetch sends `Origin: null` on POST and better-auth
+  403s it — always set `origin: http://localhost:5173` on sign-in/POST fetches.
 
 ## Gotchas
 - Backend tests (`npm test -w @crypto-wiki/backend`) auto-create + migrate a
@@ -35,3 +53,6 @@ description: Build, launch, and drive crypto-wiki end-to-end (backend API + fron
 - The seeded euf-cma draft body has no math, so an editor preview can legitimately
   contain zero `.katex` nodes — don't assert on that.
 - Intentional 404/400 probes show up in the browser console error log; expected.
+- Clean up drive artifacts after: delete test definitions/macro sets from the
+  dev DB (published revisions block API deletion — use psql), so reruns don't
+  hit unique-slug/title 409s.
