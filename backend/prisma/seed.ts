@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { coreMacroNames } from '@crypto-wiki/shared';
 import { prisma } from '../src/lib/prisma';
 import { macroHash } from '../src/lib/hash';
 
@@ -311,6 +312,13 @@ async function main() {
   await prisma.macroSetSnapshot.deleteMany();
   await prisma.macroSet.deleteMany();
   await prisma.category.deleteMany();
+
+  // macro-name registry: core vocabulary notation sets restyle. skipDuplicates
+  // keeps editor-registered names across re-seeds.
+  await prisma.macroName.createMany({
+    data: coreMacroNames.map((n) => ({ name: n.name, description: n.description })),
+    skipDuplicates: true,
+  });
 
   const standardSet = await prisma.macroSet.create({
     data: { name: 'standard-notation', macros: standardMacros, visibility: 'public' },

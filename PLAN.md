@@ -49,6 +49,40 @@ with stable permalinks so papers can cite a definition instead of restating it.
 - Cache key for Tier-2 renders: `hash(body, macroSet, preamble)` — published bodies
   are immutable, so cached renders never invalidate.
 
+### Layered macros: definition-scoped maps + a site name registry *(2026-07-09, user)*
+Motivating problem: macros lived in one flat namespace (a formulation pointed at a
+global macro set), so macros from different definitions **contaminated** each other —
+`\enc` can mean *encrypt* in one definition and *encode* in another, and a viewer's
+notation set that restyles `\enc` corrupts one of them. Also, an unpinned permalink's
+rendering could drift when the formulation's default macro set was edited (only the
+body was truly frozen).
+
+The model (render order = later wins):
+
+1. **Shim base** — the cryptocode table; rendering plumbing.
+2. **Revision `macros`** — *shared symbols*: registered names this definition uses,
+   with the definition's default expansions. Overridable by notation sets.
+3. **Viewer notation set** — overrides a *subset* of registered names the set's
+   maker cares about (`?macros=` / formulation default, as before).
+4. **Revision `localMacros`** — definition-private macros (`\LDPCPRC[n,g,t,r]`…).
+   Merged **last**, so no notation set can ever touch them (sealed).
+
+Both revision maps are draft-editable and **frozen at publish** with the body, so a
+published permalink is fully self-contained and immutable.
+
+**`MacroName` registry** — the site-enforced naming: a table of canonical macro
+names + meanings (seeded from cryptocode's conventions, extended by editors, e.g.
+`\encode` for code encoders vs `\enc` for encryption). Enforcement points:
+- Notation sets may only define registered names (validated at create/update;
+  legacy sets/snapshots are untouched — validation is write-time only).
+- The registry is **never consulted at render time** — classification into
+  shared/local is stored on the revision, so registering a name later never
+  changes what a published permalink renders.
+- Import auto-classifies each candidate's macro slice (registered → shared,
+  else local) and offers per-macro renames (paper's `\enc` meaning encode →
+  imported as `\encode`, body rewritten) — the first piece of the
+  human-in-the-loop refinement loop.
+
 ### Body format: pure LaTeX + Markdown commentary
 The *formal definition body* is **pure LaTeX** (compilable by real LaTeX, importable from
 and exportable to papers). Wiki-ish content — intuition, remarks, history, links to related
@@ -251,18 +285,22 @@ Markdown-as-definition-body (see body format above).
       submissions get a distinct ARXIV_NO_SOURCE error pointing at the paste
       path), runs `extractFromLatex`, and returns the candidate list — nothing
       is created by scanning. Step 2 needs **no new backend surface**: the
-      `/import` frontend page drives the ordinary editor CRUD (create macro
-      set → definition → formulation → draft revision), so role gates and slug
-      invariants stay enforced in one place. The page renders per-candidate
-      previews through the Tier-1 shim (side by side with the raw LaTeX),
-      prefills slugs/titles from candidate metadata, adds a formulation to an
-      existing definition when the slug already exists, attaches the combined
-      `usedMacros` slice as a new (default-unlisted) macro set on each imported
-      formulation, stamps provenance (`Imported from …, file:line`) into the
-      commentary, and reports per-candidate success/errors with editor links.
-      Everything lands as drafts; nothing auto-publishes. 14 backend tests
-      (`backend/test/import.test.ts`); Playwright-driven end to end (paste and
-      arXiv flows, incl. importing from the real 2402.09370).
+      `/import` frontend page drives the ordinary editor CRUD (definition →
+      formulation → draft revision), so role gates and slug invariants stay
+      enforced in one place. The page renders per-candidate previews through
+      the Tier-1 shim (side by side with the raw LaTeX), prefills slugs/titles
+      from candidate metadata, adds a formulation to an existing definition
+      when the slug already exists, stamps provenance (`Imported from …,
+      file:line`) into the commentary, and reports per-candidate
+      success/errors with editor links. *(Revised same day for layered
+      macros:)* each candidate's own `usedMacros` slice lands on **its**
+      revision — registered names as shared symbols, the rest as sealed
+      locals — with a per-macro rename control (body rewritten, e.g. a
+      paper's `\enc` meaning encode → `\encode`) and an inline "register as
+      shared" action. Everything lands as drafts; nothing auto-publishes.
+      14+10 backend tests (`test/import.test.ts`, `test/layered-macros.test.ts`);
+      Playwright-driven end to end (paste and arXiv flows, incl. the real
+      2402.09370, and the rename→publish→restyle-vs-sealed loop).
 - [ ] **Test corpus** of real papers (below): `.tex`-source papers for the
       deterministic importer, ePrint-only PDFs for the PDF/LLM stage, and one
       dual-hosted paper (ePrint PDF + arXiv source) whose source is ground truth for

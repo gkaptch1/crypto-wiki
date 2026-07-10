@@ -144,6 +144,8 @@ export async function definitionRoutes(app: AppInstance) {
                         create: {
                           bodyLatex: formulation.bodyLatex ?? '',
                           commentaryMd: formulation.commentaryMd ?? '',
+                          macros: formulation.macros ?? {},
+                          localMacros: formulation.localMacros ?? {},
                           authorId: userId,
                         },
                       },
@@ -532,6 +534,8 @@ export async function definitionRoutes(app: AppInstance) {
           formulationId: formulation.id,
           bodyLatex: request.body.bodyLatex,
           commentaryMd: request.body.commentaryMd ?? '',
+          macros: request.body.macros ?? {},
+          localMacros: request.body.localMacros ?? {},
           authorId: request.sessionUser!.id,
         },
       });
@@ -598,6 +602,10 @@ export async function definitionRoutes(app: AppInstance) {
           ...(request.body.bodyLatex !== undefined ? { bodyLatex: request.body.bodyLatex } : {}),
           ...(request.body.commentaryMd !== undefined
             ? { commentaryMd: request.body.commentaryMd }
+            : {}),
+          ...(request.body.macros !== undefined ? { macros: request.body.macros } : {}),
+          ...(request.body.localMacros !== undefined
+            ? { localMacros: request.body.localMacros }
             : {}),
         },
       });

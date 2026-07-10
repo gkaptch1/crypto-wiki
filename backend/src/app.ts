@@ -17,6 +17,7 @@ import { macroSetRoutes } from './routes/macro-sets';
 import { invitationRoutes } from './routes/invitations';
 import { meRoutes } from './routes/me';
 import { importRoutes } from './routes/import';
+import { macroNameRoutes } from './routes/macro-names';
 
 export type AppInstance = FastifyInstance<
   RawServerDefault,
@@ -72,6 +73,7 @@ export function buildApp(opts: { logger?: boolean } = {}) {
   app.register(invitationRoutes);
   app.register(meRoutes);
   app.register(importRoutes);
+  app.register(macroNameRoutes);
 
   return app;
 }

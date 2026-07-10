@@ -85,6 +85,8 @@ export function serializeRevision(r: Revision): RevisionDto {
     number: r.number,
     bodyLatex: r.bodyLatex,
     commentaryMd: r.commentaryMd,
+    macros: r.macros as MacroMap,
+    localMacros: r.localMacros as MacroMap,
     createdAt: r.createdAt.toISOString(),
     updatedAt: r.updatedAt.toISOString(),
     publishedAt: r.publishedAt ? r.publishedAt.toISOString() : null,

@@ -1,3 +1,4 @@
+import { coreMacroNames } from '@crypto-wiki/shared';
 import { buildApp } from '../src/app';
 import { prisma } from '../src/lib/prisma';
 import type { Role } from '../generated/prisma/client';
@@ -12,8 +13,12 @@ export type TestApp = Awaited<ReturnType<typeof makeApp>>;
 
 export async function resetDb() {
   await prisma.$executeRawUnsafe(
-    'TRUNCATE TABLE "Revision", "Formulation", "Definition", "MacroSetSnapshot", "MacroSet", "Category", "Invitation", "Session", "Account", "Verification", "User" RESTART IDENTITY CASCADE',
+    'TRUNCATE TABLE "Revision", "Formulation", "Definition", "MacroSetSnapshot", "MacroSet", "Category", "Invitation", "Session", "Account", "Verification", "User", "MacroName" RESTART IDENTITY CASCADE',
   );
+  // notation sets only accept registered names — reseed the core registry
+  await prisma.macroName.createMany({
+    data: coreMacroNames.map((n) => ({ name: n.name, description: n.description })),
+  });
 }
 
 let userCounter = 0;

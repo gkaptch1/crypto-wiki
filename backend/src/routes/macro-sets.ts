@@ -24,6 +24,22 @@ function canManage(user: SessionUser, set: { ownerId: string | null }) {
 
 const ownerName = { owner: { select: { name: true } } } as const;
 
+// Notation sets may only restyle registered names (PLAN.md "Layered macros").
+// Write-time only — existing sets and pinned snapshots are never re-checked,
+// so registry changes cannot alter what a published permalink renders.
+// Returns the offending names, or null when the map is valid.
+async function unregisteredNames(macros: MacroMap): Promise<string[] | null> {
+  const names = Object.keys(macros);
+  if (names.length === 0) return null;
+  const known = await prisma.macroName.findMany({
+    where: { name: { in: names } },
+    select: { name: true },
+  });
+  const registered = new Set(known.map((n) => n.name));
+  const unknown = names.filter((n) => !registered.has(n));
+  return unknown.length > 0 ? unknown : null;
+}
+
 // Macro-set CRUD. Visibility rules (audited by test/anonymous-audit.test.ts):
 //  - only `public` sets are ever enumerated; unlisted/anonymous are link-only
 //  - anonymous sets are serialized without owner OR timestamps (serializeMacroSet)
@@ -74,11 +90,21 @@ export async function macroSetRoutes(app: AppInstance) {
       preHandler: requireSignIn,
       schema: {
         body: schemas.CreateMacroSetBody,
-        response: { 201: schemas.MacroSetPublic, ...AUTH_ERRORS },
+        response: { 201: schemas.MacroSetPublic, 422: schemas.ApiError, ...AUTH_ERRORS },
       },
     },
     async (request, reply) => {
       const { name, macros, visibility = 'public' } = request.body;
+      const unknown = await unregisteredNames(macros);
+      if (unknown) {
+        return sendError(
+          reply,
+          422,
+          'UNREGISTERED_NAMES',
+          `Notation sets may only define registered macro names; not registered: ${unknown.join(', ')}. ` +
+            'Register the name (with its meaning) first, or drop it from the set.',
+        );
+      }
       const set = await prisma.macroSet.create({
         data: { name, macros, visibility, ownerId: request.sessionUser!.id },
         include: ownerName,
@@ -94,7 +120,12 @@ export async function macroSetRoutes(app: AppInstance) {
       schema: {
         params: UuidParams,
         body: schemas.UpdateMacroSetBody,
-        response: { 200: schemas.MacroSetPublic, 404: schemas.ApiError, ...AUTH_ERRORS },
+        response: {
+          200: schemas.MacroSetPublic,
+          404: schemas.ApiError,
+          422: schemas.ApiError,
+          ...AUTH_ERRORS,
+        },
       },
     },
     async (request, reply) => {
@@ -106,6 +137,18 @@ export async function macroSetRoutes(app: AppInstance) {
         return sendError(reply, 403, 'NOT_OWNER', 'Only the owner of a macro set can modify it.');
       }
       const { name, macros, visibility } = request.body;
+      if (macros !== undefined) {
+        const unknown = await unregisteredNames(macros);
+        if (unknown) {
+          return sendError(
+            reply,
+            422,
+            'UNREGISTERED_NAMES',
+            `Notation sets may only define registered macro names; not registered: ${unknown.join(', ')}. ` +
+              'Register the name (with its meaning) first, or drop it from the set.',
+          );
+        }
+      }
       const set = await prisma.macroSet.update({
         where: { id: existing.id },
         data: {

@@ -37,6 +37,7 @@ model User {
   definitionsCreated  Definition[]
   formulationsCreated Formulation[]
   revisionsAuthored   Revision[]
+  macroNamesCreated   MacroName[]
   invitationsSent     Invitation[]  @relation("InvitationsSent")
   invitationAccepted  Invitation?   @relation("InvitationAccepted")
 }
@@ -178,6 +179,15 @@ model Revision {
   bodyLatex    String // pure LaTeX fragment, compilable by real LaTeX
   commentaryMd String         @default("") // markdown commentary: intuition, remarks, cross-links
 
+  // definition-scoped macro layers (PLAN.md "Layered macros"), frozen at
+  // publish with the body. `macros` = shared symbols (registered names, the
+  // definition's default expansions; notation sets may override). `localMacros`
+  // = definition-private macros, merged last at render so notation sets can
+  // never touch them. Classification is stored here, NOT derived from the
+  // registry at render time — published renders must never drift.
+  macros      Json @default("{}")
+  localMacros Json @default("{}")
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   publishedAt DateTime?
@@ -189,6 +199,20 @@ model Revision {
   formulationId Int
 
   @@unique([formulationId, number])
+}
+
+// site-wide registry of canonical macro names ("\enc" = encryption algorithm,
+// "\encode" = code encoder, ...). Notation sets may only define registered
+// names (validated at write time). Never consulted at render time.
+model MacroName {
+  id          Int    @id @default(autoincrement())
+  name        String @unique // control sequence incl. backslash, e.g. "\\enc"
+  description String // one-line meaning shown wherever the name appears
+
+  createdAt DateTime @default(now())
+
+  createdBy   User?   @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdById String?
 }
 
 enum MacroSetVisibility {

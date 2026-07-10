@@ -137,10 +137,10 @@ async function resolvePage(
     );
   }
 
-  // resolve macros: explicit ?macros= (live or pinned snapshot) beats the
-  // formulation's default macro set; no set at all renders with {}
+  // resolve the notation set: explicit ?macros= (live or pinned snapshot)
+  // beats the formulation's default macro set; no set at all applies {}
   let macroSet: MacroSetPublic | null = null;
-  let macros: MacroMap = {};
+  let setMacros: MacroMap = {};
   let pinnedMacroHash: string | null = null;
 
   if (macrosRef !== null) {
@@ -173,15 +173,25 @@ async function resolvePage(
           `Macro set ${parts.uuid} has no pinned snapshot matching "${parts.hash}".`,
         );
       }
-      macros = snapshot.macros as MacroMap;
+      setMacros = snapshot.macros as MacroMap;
       pinnedMacroHash = snapshot.hash;
     } else {
-      macros = set.macros as MacroMap;
+      setMacros = set.macros as MacroMap;
     }
   } else if (formulation.defaultMacroSet) {
     macroSet = serializeMacroSet(formulation.defaultMacroSet);
-    macros = formulation.defaultMacroSet.macros as MacroMap;
+    setMacros = formulation.defaultMacroSet.macros as MacroMap;
   }
+
+  // layered render map (PLAN.md "Layered macros"): the revision's shared
+  // symbols under the notation set, its local macros LAST — locals are
+  // sealed, no notation set can restyle them. The frontend spreads the shim
+  // base underneath.
+  const macros: MacroMap = {
+    ...(revision.macros as MacroMap),
+    ...setMacros,
+    ...(revision.localMacros as MacroMap),
+  };
 
   return reply.send({
     definition: {

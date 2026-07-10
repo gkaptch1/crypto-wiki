@@ -7,6 +7,7 @@ import {
   createRevision,
   deleteRevision,
   getDefinitionEditor,
+  getMacroNames,
   getMacroSet,
   getMacroSets,
   publishRevision,
@@ -28,6 +29,25 @@ export const Route = createFileRoute('/editor/$defSlug')({
 
 function errMsg(err: unknown): string {
   return err instanceof ApiRequestError ? err.message : 'Request failed.';
+}
+
+// revision macro maps are edited as "\name = expansion" lines
+const serializeMacroMap = (m: Record<string, string>) =>
+  Object.entries(m)
+    .map(([k, v]) => `${k} = ${v}`)
+    .join('\n');
+
+function parseMacroMap(text: string): { map: Record<string, string>; errors: string[] } {
+  const map: Record<string, string> = {};
+  const errors: string[] = [];
+  for (const raw of text.split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(/^(\\[a-zA-Z]+)\s*=\s*(.*)$/);
+    if (!m) errors.push(line);
+    else map[m[1]] = m[2];
+  }
+  return { map, errors };
 }
 
 function EditorPage() {
@@ -243,6 +263,8 @@ function FormulationPanel({
       createRevision(defSlug, formulation.slug, {
         bodyLatex: revision?.bodyLatex ?? '',
         commentaryMd: revision?.commentaryMd ?? '',
+        macros: revision?.macros ?? {},
+        localMacros: revision?.localMacros ?? {},
       }),
     onSuccess: (rev) => {
       onChanged();
@@ -420,18 +442,44 @@ function RevisionEditor({
 }) {
   const [body, setBody] = useState(revision.bodyLatex);
   const [commentary, setCommentary] = useState(revision.commentaryMd);
+  const [sharedText, setSharedText] = useState(serializeMacroMap(revision.macros));
+  const [localText, setLocalText] = useState(serializeMacroMap(revision.localMacros));
   const [error, setError] = useState<string | null>(null);
   const isDraft = revision.status === 'draft';
-  const dirty = body !== revision.bodyLatex || commentary !== revision.commentaryMd;
 
+  const shared = useMemo(() => parseMacroMap(sharedText), [sharedText]);
+  const local = useMemo(() => parseMacroMap(localText), [localText]);
+  const macroErrors = [...shared.errors, ...local.errors];
+  const dirty =
+    body !== revision.bodyLatex ||
+    commentary !== revision.commentaryMd ||
+    JSON.stringify(shared.map) !== JSON.stringify(revision.macros) ||
+    JSON.stringify(local.map) !== JSON.stringify(revision.localMacros);
+
+  // registry hints: shared symbols should be registered names, and a local
+  // macro reusing a registered name is exactly the \enc-vs-\encode hazard
+  const registry = useQuery({ queryKey: ['macro-names'], queryFn: getMacroNames });
+  const registered = useMemo(
+    () => new Set((registry.data ?? []).map((n) => n.name)),
+    [registry.data],
+  );
+  const unregisteredShared = Object.keys(shared.map).filter((n) => !registered.has(n));
+  const registeredLocal = Object.keys(local.map).filter((n) => registered.has(n));
+
+  const payload = () => ({
+    bodyLatex: body,
+    commentaryMd: commentary,
+    macros: shared.map,
+    localMacros: local.map,
+  });
   const save = useMutation({
-    mutationFn: () => updateRevision(defSlug, fSlug, revision.id, { bodyLatex: body, commentaryMd: commentary }),
+    mutationFn: () => updateRevision(defSlug, fSlug, revision.id, payload()),
     onSuccess: onChanged,
     onError: (e) => setError(errMsg(e)),
   });
   const publish = useMutation({
     mutationFn: async () => {
-      if (dirty) await updateRevision(defSlug, fSlug, revision.id, { bodyLatex: body, commentaryMd: commentary });
+      if (dirty) await updateRevision(defSlug, fSlug, revision.id, payload());
       return publishRevision(defSlug, fSlug, revision.id);
     },
     onSuccess: onChanged,
@@ -444,6 +492,11 @@ function RevisionEditor({
   });
 
   const preview = useMemo(() => body, [body]);
+  // same layering as the public page: shared symbols ← notation set ← locals
+  const previewLayered = useMemo(
+    () => ({ ...shared.map, ...previewMacros, ...local.map }),
+    [shared.map, previewMacros, local.map],
+  );
 
   return (
     <div className="space-y-3">
@@ -453,14 +506,14 @@ function RevisionEditor({
             <span className="rounded bg-amber-100 text-amber-800 px-2 py-0.5">draft</span>
             <button
               className="border border-gray-300 rounded px-2.5 py-1 hover:border-black disabled:opacity-50"
-              disabled={!dirty || save.isPending}
+              disabled={!dirty || save.isPending || macroErrors.length > 0}
               onClick={() => save.mutate()}
             >
               {save.isPending ? 'Saving…' : dirty ? 'Save' : 'Saved'}
             </button>
             <button
               className="bg-black text-white rounded px-2.5 py-1 disabled:opacity-50"
-              disabled={publish.isPending}
+              disabled={publish.isPending || macroErrors.length > 0}
               onClick={() => {
                 if (
                   window.confirm(
@@ -491,6 +544,45 @@ function RevisionEditor({
               spellCheck={false}
             />
           </label>
+          <div className="grid gap-3 md:grid-cols-2">
+            <label className="block text-sm text-gray-600">
+              Shared symbols — registered names this definition uses; notation sets may restyle
+              them (one <code>\name = expansion</code> per line)
+              <textarea
+                className="mt-1 w-full border border-gray-300 rounded px-3 py-2 font-mono text-sm h-24"
+                value={sharedText}
+                onChange={(e) => setSharedText(e.target.value)}
+                spellCheck={false}
+              />
+              {unregisteredShared.length > 0 && (
+                <span className="block text-xs text-amber-700 mt-0.5">
+                  Not in the name registry (register the name, or move to local):{' '}
+                  {unregisteredShared.join(' ')}
+                </span>
+              )}
+            </label>
+            <label className="block text-sm text-gray-600">
+              Local macros — private to this definition, sealed from notation sets
+              <textarea
+                className="mt-1 w-full border border-gray-300 rounded px-3 py-2 font-mono text-sm h-24"
+                value={localText}
+                onChange={(e) => setLocalText(e.target.value)}
+                spellCheck={false}
+              />
+              {registeredLocal.length > 0 && (
+                <span className="block text-xs text-amber-700 mt-0.5">
+                  These are registered site-wide names — if they mean the same thing here, move
+                  them to shared so notation sets apply: {registeredLocal.join(' ')}
+                </span>
+              )}
+            </label>
+          </div>
+          {macroErrors.length > 0 && (
+            <p className="text-sm text-red-600">
+              Unparseable macro line(s): {macroErrors.join(' · ')} — expected{' '}
+              <code>\name = expansion</code>.
+            </p>
+          )}
           <label className="block text-sm text-gray-600">
             Commentary (Markdown: intuition, remarks, history)
             <textarea
@@ -502,27 +594,37 @@ function RevisionEditor({
           </label>
         </>
       ) : (
-        <div className="flex items-center gap-3 text-sm">
-          <span className="rounded bg-green-100 text-green-800 px-2 py-0.5">
-            r{revision.number} — published {new Date(revision.publishedAt!).toLocaleDateString()},
-            immutable
-          </span>
-          <Link
-            to="/def/$defSlug/$formulationRef"
-            params={{ defSlug, formulationRef: `${fSlug}@r${revision.number}` }}
-            className="text-blue-700 hover:underline"
-          >
-            permalink →
-          </Link>
+        <div className="space-y-2 text-sm">
+          <div className="flex items-center gap-3">
+            <span className="rounded bg-green-100 text-green-800 px-2 py-0.5">
+              r{revision.number} — published {new Date(revision.publishedAt!).toLocaleDateString()},
+              immutable
+            </span>
+            <Link
+              to="/def/$defSlug/$formulationRef"
+              params={{ defSlug, formulationRef: `${fSlug}@r${revision.number}` }}
+              className="text-blue-700 hover:underline"
+            >
+              permalink →
+            </Link>
+          </div>
+          {(Object.keys(revision.macros).length > 0 ||
+            Object.keys(revision.localMacros).length > 0) && (
+            <p className="text-xs text-gray-500 font-mono">
+              shared: {Object.keys(revision.macros).join(' ') || '—'} · local:{' '}
+              {Object.keys(revision.localMacros).join(' ') || '—'}
+            </p>
+          )}
         </div>
       )}
 
       <div>
         <h3 className="text-sm font-semibold text-gray-600 mb-1">
-          Preview (KaTeX + cryptocode shim{previewMacros && Object.keys(previewMacros).length > 0 ? ' + default macro set' : ''})
+          Preview (KaTeX + cryptocode shim + revision macros
+          {previewMacros && Object.keys(previewMacros).length > 0 ? ' + default macro set' : ''})
         </h3>
         <div className="rounded-lg border border-gray-300 bg-white p-6">
-          <LatexView body={isDraft ? preview : revision.bodyLatex} macros={previewMacros} />
+          <LatexView body={isDraft ? preview : revision.bodyLatex} macros={previewLayered} />
         </div>
       </div>
     </div>

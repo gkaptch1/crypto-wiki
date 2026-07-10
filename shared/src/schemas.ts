@@ -182,6 +182,10 @@ export const Revision = Type.Object({
   number: Type.Union([Type.Integer(), Type.Null()]),
   bodyLatex: Type.String(),
   commentaryMd: Type.String(),
+  /** Shared symbols: registered names with this definition's default expansions. */
+  macros: MacroMap,
+  /** Definition-private macros — merged last at render, sealed from notation sets. */
+  localMacros: MacroMap,
   createdAt: Type.String(),
   updatedAt: Type.String(),
   publishedAt: Type.Union([Type.String(), Type.Null()]),
@@ -227,6 +231,8 @@ export const CreateDefinitionBody = Type.Object({
       slug: Type.Optional(Slug),
       bodyLatex: Type.Optional(Type.String({ maxLength: 100_000 })),
       commentaryMd: Type.Optional(Type.String({ maxLength: 100_000 })),
+      macros: Type.Optional(MacroMap),
+      localMacros: Type.Optional(MacroMap),
       citation: Type.Optional(CitationInput),
     }),
   ),
@@ -255,11 +261,15 @@ export const UpdateFormulationBody = Type.Object({
 export const CreateRevisionBody = Type.Object({
   bodyLatex: Type.String({ maxLength: 100_000 }),
   commentaryMd: Type.Optional(Type.String({ maxLength: 100_000 })),
+  macros: Type.Optional(MacroMap),
+  localMacros: Type.Optional(MacroMap),
 });
 
 export const UpdateRevisionBody = Type.Object({
   bodyLatex: Type.Optional(Type.String({ maxLength: 100_000 })),
   commentaryMd: Type.Optional(Type.String({ maxLength: 100_000 })),
+  macros: Type.Optional(MacroMap),
+  localMacros: Type.Optional(MacroMap),
 });
 
 export const CreateMacroSetBody = Type.Object({
@@ -277,6 +287,26 @@ export const UpdateMacroSetBody = Type.Object({
 export const ForkMacroSetBody = Type.Object({
   name: Type.Optional(Type.String({ minLength: 1, maxLength: 200 })),
   visibility: Type.Optional(MacroSetVisibility),
+});
+
+// ---------------------------------------------------------------------------
+// Macro-name registry (PLAN.md "Layered macros"): canonical names notation
+// sets are validated against at write time. Never consulted at render time.
+// ---------------------------------------------------------------------------
+
+/** A macro control sequence, e.g. "\\enc". Same pattern as MacroMap keys. */
+export const MacroNameStr = Type.String({ pattern: '^\\\\[a-zA-Z]+$', maxLength: 64 });
+
+export const MacroName = Type.Object({
+  name: MacroNameStr,
+  description: Type.String(),
+});
+
+export const MacroNameList = Type.Array(MacroName);
+
+export const CreateMacroNameBody = Type.Object({
+  name: MacroNameStr,
+  description: Type.String({ minLength: 1, maxLength: 300 }),
 });
 
 export const CreateInvitationBody = Type.Object({

@@ -1,13 +1,14 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import type { CitationInput, ImportScanResult, MacroSetVisibility } from '@crypto-wiki/shared';
+import type { CitationInput, ImportScanResult } from '@crypto-wiki/shared';
 import {
   createDefinition,
   createFormulation,
-  createMacroSet,
+  createMacroName,
   createRevision,
   getDefinitions,
+  getMacroNames,
   importScan,
 } from '../api/definitions';
 import { ApiRequestError } from '../api/client';
@@ -18,10 +19,11 @@ import LatexView from '../components/LatexView';
 // 1. submit LaTeX source (arXiv id / uploaded files / paste) → the backend
 //    runs the deterministic extractor and returns candidates — nothing is
 //    created by scanning;
-// 2. pick candidates, name them, and import: each becomes a DRAFT revision
-//    in a new or existing definition via the ordinary editor endpoints, with
-//    the combined used-macro slices offered as a macro set. Nothing is ever
-//    auto-published.
+// 2. pick candidates, name them, review each one's macro slice (registered
+//    names become the revision's shared symbols, everything else its sealed
+//    local macros; renames rewrite the body, e.g. a paper's \enc that means
+//    encode → \encode), and import: each candidate becomes a DRAFT revision
+//    carrying its own macros. Nothing is ever auto-published.
 
 export const Route = createFileRoute('/import')({
   component: () => (
@@ -37,6 +39,8 @@ interface Pick {
   defSlug: string;
   title: string;
   fSlug: string;
+  /** original macro name → name to import as (identity entries omitted). */
+  renames: Record<string, string>;
 }
 
 interface ItemResult {
@@ -61,6 +65,14 @@ function parseArxivId(input: string): string | null {
   return m ? m[1] : null;
 }
 
+/** Replace every \old with \new in a body, without eating longer names (\enc vs \encode). */
+function renameMacroInBody(body: string, from: string, to: string): string {
+  const escaped = from.replace(/\\/g, '\\\\');
+  return body.replace(new RegExp(`${escaped}(?![a-zA-Z])`, 'g'), to);
+}
+
+const MACRO_NAME_RE = /^\\[a-zA-Z]+$/;
+
 const inputCls = 'mt-1 w-full border border-gray-300 rounded px-2 py-1.5';
 const monoInputCls = `${inputCls} font-mono`;
 const buttonCls = 'bg-black text-white rounded px-4 py-2 text-sm disabled:opacity-50';
@@ -68,6 +80,11 @@ const buttonCls = 'bg-black text-white rounded px-4 py-2 text-sm disabled:opacit
 function ImportPage() {
   const queryClient = useQueryClient();
   const defs = useQuery({ queryKey: ['definitions', '', ''], queryFn: () => getDefinitions() });
+  const registry = useQuery({ queryKey: ['macro-names'], queryFn: getMacroNames });
+  const registered = useMemo(
+    () => new Map((registry.data ?? []).map((n) => [n.name, n.description])),
+    [registry.data],
+  );
 
   // ---- step 1: source input
   const [mode, setMode] = useState<'arxiv' | 'upload' | 'paste'>('arxiv');
@@ -78,18 +95,11 @@ function ImportPage() {
 
   // ---- step 2: scan result + selection
   const [scan, setScan] = useState<ImportScanResult | null>(null);
-  /** Human label + citation eprint for where the source came from. */
   const [source, setSource] = useState('');
   const [picks, setPicks] = useState<Record<number, Pick>>({});
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
   const [citation, setCitation] = useState({ paper: '', authors: '', year: '', eprint: '' });
-  const [makeMacroSet, setMakeMacroSet] = useState(true);
-  const [macroSetName, setMacroSetName] = useState('');
-  const [macroSetVisibility, setMacroSetVisibility] = useState<MacroSetVisibility>('unlisted');
   const [results, setResults] = useState<Record<number, ItemResult>>({});
-  const [macroSetResult, setMacroSetResult] = useState<string | null>(null);
-  /** Set once per scan so a retry after partial failure doesn't duplicate it. */
-  const [createdMacroSetUuid, setCreatedMacroSetUuid] = useState<string | null>(null);
 
   const scanMut = useMutation({
     mutationFn: () => {
@@ -111,10 +121,7 @@ function ImportPage() {
       setPicks({});
       setExpanded({});
       setResults({});
-      setMacroSetResult(null);
-      setCreatedMacroSetUuid(null);
       setCitation({ paper: '', authors: '', year: '', eprint: id ?? '' });
-      setMacroSetName(id ? `arXiv:${id} notation` : 'Imported notation');
     },
     onError: (err) => setScanError(err.message),
   });
@@ -128,15 +135,6 @@ function ImportPage() {
       })),
     [picks, scan],
   );
-
-  // union of the selected candidates' macro slices, split by KaTeX safety
-  const macroUnion = useMemo(() => {
-    if (!scan) return { safe: [] as string[], unsafe: [] as string[] };
-    const names = new Set(selected.flatMap(({ candidate }) => candidate.usedMacros));
-    const safe = [...names].filter((n) => n in scan.macroMap).sort();
-    const unsafe = [...names].filter((n) => !(n in scan.macroMap)).sort();
-    return { safe, unsafe };
-  }, [scan, selected]);
 
   const existingSlugs = useMemo(() => new Set((defs.data ?? []).map((d) => d.slug)), [defs.data]);
 
@@ -155,6 +153,7 @@ function ImportPage() {
           defSlug: slugify(base, `${candidate.envName}-${index + 1}`),
           title,
           fSlug: 'imported',
+          renames: {},
         },
       };
     });
@@ -162,6 +161,25 @@ function ImportPage() {
 
   const setPick = (index: number, patch: Partial<Pick>) =>
     setPicks((prev) => ({ ...prev, [index]: { ...prev[index], ...patch } }));
+
+  /** The candidate's definable macro slice, with renames applied and classified. */
+  function candidateMacroPlan(candidate: Candidate, pick: Pick) {
+    const rows = candidate.usedMacros
+      .filter((n) => n in scan!.macroMap)
+      .map((orig) => {
+        const target = pick.renames[orig] ?? orig;
+        const valid = MACRO_NAME_RE.test(target);
+        return {
+          orig,
+          target,
+          valid,
+          shared: valid && registered.has(target),
+          description: registered.get(target),
+        };
+      });
+    const undefinable = candidate.usedMacros.filter((n) => !(n in scan!.macroMap));
+    return { rows, undefinable };
+  }
 
   const importMut = useMutation({
     mutationFn: async () => {
@@ -172,28 +190,20 @@ function ImportPage() {
       const year = parseInt(citation.year, 10);
       if (!Number.isNaN(year)) cite.year = year;
 
-      let macroSetUuid = createdMacroSetUuid ?? undefined;
-      let macroSetMessage: string | null = macroSetResult;
-      if (!macroSetUuid && makeMacroSet && macroUnion.safe.length > 0) {
-        try {
-          const set = await createMacroSet({
-            name: macroSetName.trim() || 'Imported notation',
-            macros: Object.fromEntries(macroUnion.safe.map((n) => [n, scan!.macroMap[n]])),
-            visibility: macroSetVisibility,
-          });
-          macroSetUuid = set.uuid;
-          setCreatedMacroSetUuid(set.uuid);
-          macroSetMessage = `Created macro set "${set.name}" (${macroUnion.safe.length} macros).`;
-        } catch (err) {
-          macroSetMessage = `Macro set failed: ${err instanceof ApiRequestError ? err.message : String(err)}`;
-        }
-      }
-
       const itemResults: Record<number, ItemResult> = {};
       const created = new Set<string>();
       for (const { index, pick, candidate } of selected) {
         if (results[index]?.ok) continue; // already imported in a previous run
         try {
+          const { rows } = candidateMacroPlan(candidate, pick);
+          let body = candidate.body;
+          const macros: Record<string, string> = {};
+          const localMacros: Record<string, string> = {};
+          for (const row of rows) {
+            if (row.target !== row.orig) body = renameMacroInBody(body, row.orig, row.target);
+            (row.shared ? macros : localMacros)[row.target] = scan!.macroMap[row.orig];
+          }
+
           if (!existingSlugs.has(pick.defSlug) && !created.has(pick.defSlug)) {
             try {
               await createDefinition({ slug: pick.defSlug, title: pick.title });
@@ -203,14 +213,12 @@ function ImportPage() {
             }
             created.add(pick.defSlug);
           }
-          await createFormulation(pick.defSlug, {
-            slug: pick.fSlug,
-            citation: cite,
-            ...(macroSetUuid ? { defaultMacroSetUuid: macroSetUuid } : {}),
-          });
+          await createFormulation(pick.defSlug, { slug: pick.fSlug, citation: cite });
           await createRevision(pick.defSlug, pick.fSlug, {
-            bodyLatex: candidate.body,
+            bodyLatex: body,
             commentaryMd: `*Imported from ${source} (\`${candidate.file}:${candidate.line}\`).*`,
+            macros,
+            localMacros,
           });
           itemResults[index] = { ok: true };
         } catch (err) {
@@ -220,13 +228,23 @@ function ImportPage() {
           };
         }
       }
-      return { itemResults, macroSetMessage };
+      return itemResults;
     },
-    onSuccess: ({ itemResults, macroSetMessage }) => {
+    onSuccess: (itemResults) => {
       setResults((prev) => ({ ...prev, ...itemResults }));
-      setMacroSetResult(macroSetMessage);
       queryClient.invalidateQueries({ queryKey: ['definitions'] });
     },
+  });
+
+  const registerName = useMutation({
+    mutationFn: (name: string) => {
+      const description = window.prompt(
+        `Register ${name} in the site's macro-name registry.\n\nOne-line meaning (e.g. "Encoder of a code"):`,
+      );
+      if (!description?.trim()) return Promise.reject(new Error('cancelled'));
+      return createMacroName({ name, description: description.trim() });
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['macro-names'] }),
   });
 
   async function onFiles(list: FileList | null) {
@@ -238,6 +256,9 @@ function ImportPage() {
 
   const doneCount = Object.values(results).filter((r) => r.ok).length;
   const importable = selected.filter(({ index }) => !results[index]?.ok);
+  const hasInvalidRename = importable.some(({ pick, candidate }) =>
+    candidateMacroPlan(candidate, pick).rows.some((r) => !r.valid),
+  );
 
   return (
     <div className="space-y-8">
@@ -245,7 +266,8 @@ function ImportPage() {
         <h1 className="text-xl font-bold">Import from a paper</h1>
         <p className="text-sm text-gray-600 mt-1">
           Scan LaTeX source for definition-like environments and game boxes, then choose what to
-          pull in. Everything lands as <em>drafts</em> — nothing is published by importing.
+          pull in. Each import lands as a <em>draft</em> carrying its own macros — nothing is
+          published by importing.
         </p>
       </div>
 
@@ -365,6 +387,7 @@ function ImportPage() {
             {scan.candidates.map((candidate, index) => {
               const pick = picks[index];
               const result = results[index];
+              const plan = pick ? candidateMacroPlan(candidate, pick) : null;
               return (
                 <li key={index} className="border border-gray-200 rounded-lg">
                   <div className="flex items-baseline gap-3 px-4 py-2.5">
@@ -416,37 +439,93 @@ function ImportPage() {
                   )}
 
                   {pick && !result?.ok && (
-                    <div className="border-t border-gray-100 px-4 py-3 grid gap-3 md:grid-cols-3 text-sm bg-gray-50/50">
-                      <label className="block">
-                        Definition title
-                        <input
-                          className={inputCls}
-                          value={pick.title}
-                          placeholder="Pseudorandom Function"
-                          onChange={(e) => setPick(index, { title: e.target.value })}
-                        />
-                      </label>
-                      <label className="block">
-                        Definition slug
-                        <input
-                          className={monoInputCls}
-                          value={pick.defSlug}
-                          onChange={(e) => setPick(index, { defSlug: e.target.value })}
-                        />
-                        {existingSlugs.has(pick.defSlug) && (
-                          <span className="text-xs text-blue-700">
-                            exists — will add a formulation to it
-                          </span>
-                        )}
-                      </label>
-                      <label className="block">
-                        Formulation slug
-                        <input
-                          className={monoInputCls}
-                          value={pick.fSlug}
-                          onChange={(e) => setPick(index, { fSlug: e.target.value })}
-                        />
-                      </label>
+                    <div className="border-t border-gray-100 px-4 py-3 space-y-3 text-sm bg-gray-50/50">
+                      <div className="grid gap-3 md:grid-cols-3">
+                        <label className="block">
+                          Definition title
+                          <input
+                            className={inputCls}
+                            value={pick.title}
+                            placeholder="Pseudorandom Function"
+                            onChange={(e) => setPick(index, { title: e.target.value })}
+                          />
+                        </label>
+                        <label className="block">
+                          Definition slug
+                          <input
+                            className={monoInputCls}
+                            value={pick.defSlug}
+                            onChange={(e) => setPick(index, { defSlug: e.target.value })}
+                          />
+                          {existingSlugs.has(pick.defSlug) && (
+                            <span className="text-xs text-blue-700">
+                              exists — will add a formulation to it
+                            </span>
+                          )}
+                        </label>
+                        <label className="block">
+                          Formulation slug
+                          <input
+                            className={monoInputCls}
+                            value={pick.fSlug}
+                            onChange={(e) => setPick(index, { fSlug: e.target.value })}
+                          />
+                        </label>
+                      </div>
+
+                      {plan && plan.rows.length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-xs font-semibold text-gray-600">
+                            Macros this candidate carries — registered names become shared symbols
+                            (notation sets can restyle them), the rest stay local (sealed). Rename
+                            to fix semantics, e.g. a paper's <code>\enc</code> that means encode →{' '}
+                            <code>\encode</code>.
+                          </p>
+                          {plan.rows.map((row) => (
+                            <div key={row.orig} className="flex items-center gap-2 text-xs">
+                              <code className="w-28 shrink-0">{row.orig}</code>
+                              <span className="text-gray-400">import as</span>
+                              <input
+                                className={`border rounded px-1.5 py-0.5 font-mono w-32 ${
+                                  row.valid ? 'border-gray-300' : 'border-red-500'
+                                }`}
+                                value={row.target}
+                                onChange={(e) =>
+                                  setPick(index, {
+                                    renames: { ...pick.renames, [row.orig]: e.target.value },
+                                  })
+                                }
+                              />
+                              {row.shared ? (
+                                <span className="rounded bg-green-100 text-green-800 px-1.5 py-0.5">
+                                  shared — {row.description}
+                                </span>
+                              ) : (
+                                <>
+                                  <span className="rounded bg-gray-200 text-gray-700 px-1.5 py-0.5">
+                                    local (sealed)
+                                  </span>
+                                  {row.valid && (
+                                    <button
+                                      type="button"
+                                      className="underline text-gray-500"
+                                      onClick={() => registerName.mutate(row.target)}
+                                    >
+                                      register as shared…
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          ))}
+                          {plan.undefinable.length > 0 && (
+                            <p className="text-xs text-amber-700">
+                              Used but not importable as-is (define by hand in the editor):{' '}
+                              <span className="font-mono">{plan.undefinable.join(' ')}</span>
+                            </p>
+                          )}
+                        </div>
+                      )}
                     </div>
                   )}
 
@@ -516,57 +595,6 @@ function ImportPage() {
                 </label>
               </fieldset>
 
-              <div className="text-sm space-y-2 border-t border-gray-100 pt-3">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={makeMacroSet}
-                    onChange={(e) => setMakeMacroSet(e.target.checked)}
-                    disabled={macroUnion.safe.length === 0}
-                  />
-                  Create a macro set from the {macroUnion.safe.length} macros these candidates use
-                </label>
-                {makeMacroSet && macroUnion.safe.length > 0 && (
-                  <div className="grid gap-3 md:grid-cols-2 pl-6">
-                    <label className="block">
-                      Name
-                      <input
-                        className={inputCls}
-                        value={macroSetName}
-                        onChange={(e) => setMacroSetName(e.target.value)}
-                      />
-                    </label>
-                    <label className="block">
-                      Visibility
-                      <select
-                        className={inputCls}
-                        value={macroSetVisibility}
-                        onChange={(e) => setMacroSetVisibility(e.target.value as MacroSetVisibility)}
-                      >
-                        <option value="unlisted">unlisted (link-only)</option>
-                        <option value="public">public</option>
-                      </select>
-                    </label>
-                    <p className="md:col-span-2 text-xs text-gray-500 font-mono break-words">
-                      {macroUnion.safe.join(' ')}
-                    </p>
-                  </div>
-                )}
-                {macroUnion.safe.length > 500 && (
-                  <p className="text-amber-700">
-                    {macroUnion.safe.length} macros exceeds the 500-macro set limit — deselect some
-                    candidates or trim the set afterwards.
-                  </p>
-                )}
-                {macroUnion.unsafe.length > 0 && (
-                  <p className="text-amber-700">
-                    Used but not importable as-is (edit by hand later):{' '}
-                    <span className="font-mono">{macroUnion.unsafe.join(' ')}</span>
-                  </p>
-                )}
-              </div>
-
-              {macroSetResult && <p className="text-sm text-gray-700">{macroSetResult}</p>}
               {doneCount > 0 && (
                 <p className="text-sm text-green-700">
                   {doneCount} draft(s) imported — find them under{' '}
@@ -583,7 +611,7 @@ function ImportPage() {
                 disabled={
                   importMut.isPending ||
                   importable.length === 0 ||
-                  (makeMacroSet && macroUnion.safe.length > 500) ||
+                  hasInvalidRename ||
                   importable.some(({ pick }) => !pick.title.trim() || !pick.defSlug || !pick.fSlug)
                 }
                 onClick={() => importMut.mutate()}
@@ -593,6 +621,11 @@ function ImportPage() {
               {importable.some(({ pick }) => !pick.title.trim()) && (
                 <p className="text-xs text-gray-500">
                   Every selected candidate needs a definition title.
+                </p>
+              )}
+              {hasInvalidRename && (
+                <p className="text-xs text-red-600">
+                  Macro names must look like <code>\name</code> (letters only).
                 </p>
               )}
             </div>

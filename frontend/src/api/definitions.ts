@@ -13,6 +13,8 @@ import type {
   ImportScanBody,
   ImportScanResult,
   Invitation,
+  CreateMacroNameBody,
+  MacroName,
   MacroSetOwned,
   MacroSetPin,
   MacroSetPublic,
@@ -113,6 +115,13 @@ export const pinMacroSet = (uuid: string) => api<MacroSetPin>(`/macro-sets/${uui
 
 export const forkMacroSet = (uuid: string, body: ForkMacroSetBody = {}) =>
   api<MacroSetPublic>(`/macro-sets/${uuid}/fork`, post(body));
+
+// ------------------------------------------------------- macro-name registry
+
+export const getMacroNames = () => api<MacroName[]>('/macro-names');
+
+export const createMacroName = (body: CreateMacroNameBody) =>
+  api<MacroName>('/macro-names', post(body));
 
 // ------------------------------------------------------------- paper import
 

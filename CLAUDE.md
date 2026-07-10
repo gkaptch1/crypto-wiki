@@ -25,9 +25,10 @@ password fallback below.
   (`npm run build -w @crypto-wiki/shared`) — backend/frontend consume `dist/`.
 - `backend/` — Fastify + Prisma 7 + PostgreSQL + better-auth. App in `src/app.ts`
   (buildApp, used by tests), routes in `src/routes/` (permalinks / definitions /
-  macro-sets / auth / invitations / me / import — `POST /import/scan` is the
-  importer's scan step: `files` map or `arxivId` in, extraction out, creates
-  nothing; arXiv fetch + gunzip + minimal ustar reader in `src/lib/arxiv.ts`),
+  macro-sets / auth / invitations / me / import / macro-names — `POST
+  /import/scan` is the importer's scan step: `files` map or `arxivId` in,
+  extraction out, creates nothing; arXiv fetch + gunzip + minimal ustar reader
+  in `src/lib/arxiv.ts`; `/macro-names` is the macro-name registry),
   better-auth config + role-assignment hook
   in `src/lib/auth.ts`, session guards (`requireEditor` etc.) in `src/lib/session.ts`,
   schema in `prisma/schema.prisma`, seed in `prisma/seed.ts`, tests in `test/`.
@@ -95,12 +96,23 @@ password fallback below.
 `Definition` (concept; unique url `slug` + display `title`; categories) → many
 `Formulation` (a way of formalizing it: slug, `isDefault`, `order`, citation metadata,
 optional default `MacroSet`) → many `Revision` (pure-LaTeX `bodyLatex` + Markdown
-`commentaryMd`; `draft` → `published`; published ones are **immutable** and numbered
+`commentaryMd` + **two macro maps**: `macros` = shared symbols with the definition's
+default expansions, `localMacros` = definition-private; `draft` → `published`;
+published ones are **immutable** — body AND macro maps — and numbered
 r1, r2, … per formulation — that's what permalinks pin). `MacroSet` has an unguessable
 UUID, a visibility enum (`public`/`unlisted`/`anonymous` — anonymous sets are never
 listed and never serialize owner or timestamps), and immutable content-hash
 `MacroSetSnapshot`s for `?macros=<uuid>@<hash>` pinning. Permalinks: `/def/prf`,
 `/def/prf/game-based`, `/def/prf/game-based@r2` (what papers cite).
+
+**Layered macros** (PLAN.md has the full design): render order is shim base ←
+`revision.macros` ← notation set ← `revision.localMacros` — locals merge LAST, so
+notation sets can never contaminate a definition's private macros. `MacroName` is
+the site registry of canonical names (seeded from `shared/src/macro-names.ts` by
+the dev seed AND by `test/helpers.ts resetDb`); notation-set create/update rejects
+unregistered names (422 UNREGISTERED_NAMES) but the registry is **never consulted
+at render time** — classification lives on the revision, so registering a name
+later can't change a published render. Tests in `test/layered-macros.test.ts`.
 
 Auth (Phase 2): better-auth tables `User`(+`role`)/`Session`/`Account`/`Verification`
 plus `Invitation`. Roles: viewer (default, sign-in optional) < editor (invited; wiki
