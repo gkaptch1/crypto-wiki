@@ -10,9 +10,11 @@ macro set + draft formulations; test corpus in PLAN.md). Extractor, corpus
 harness, the scan-then-select importer surface (`POST /import/scan` +
 `/import` page), and the PDF/LLM stage (deterministic pdfjs scout → Claude
 reconstruction → validated through `extractFromLatex`; needs
-`ANTHROPIC_API_KEY`) are built; remaining: PDF-stage validation on the real
-corpus (needs the API key), citation auto-import, human-in-the-loop
-refinement UX. Production rendering +
+`ANTHROPIC_API_KEY`) are built AND validated on the real corpus (2026-07-10:
+guided+haiku-4-5 passed the ground-truth bar at ~$0.08–0.12/paper and is now
+the default — PLAN.md "PDF-stage validation" has the results); remaining:
+opt-in PDF harness in `import-tests/`, citation auto-import,
+human-in-the-loop refinement UX. Production rendering +
 deploy polish moved to Phase 4 (blocked on university VM / OAuth creds / Docker
 anyway). Google/GitHub OAuth app credentials are NOT yet created — dev uses the
 password fallback below.
@@ -73,7 +75,7 @@ password fallback below.
   email+password strategy (powers the /signin dev form and how tests mint sessions;
   NEVER set in production), `ANTHROPIC_API_KEY` — PDF import's LLM stage (unset →
   503 LLM_NOT_CONFIGURED on PDF scans only; `IMPORT_LLM_MODEL` overrides the
-  default claude-opus-4-8).
+  default claude-haiku-4-5, validated 2026-07-10).
 
 ## Gotchas (learned the hard way)
 - **`prisma migrate dev` cannot run non-interactively.** Generate migration SQL with

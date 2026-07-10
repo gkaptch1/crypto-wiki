@@ -317,8 +317,9 @@ Markdown-as-definition-body (see body format above).
       deterministic importer, ePrint-only PDFs for the PDF/LLM stage, and one
       dual-hosted paper (ePrint PDF + arXiv source) whose source is ground truth for
       validating PDF extraction. Shim failures found while importing become
-      `render-tests/` fragments. *Starting six wired into `import-tests/`; PDF-stage
-      papers pending that pipeline.*
+      `render-tests/` fragments. *Starting six wired into `import-tests/`; all
+      three PDF-stage papers run through guided+haiku 2026-07-10 (results under
+      "PDF-stage validation" below).*
 - [x] **LLM-assisted importer** — first cut BUILT (2026-07-10): from an ePrint id
       or an uploaded PDF, extract candidate definitions + notation. Hybrid by
       design (user, 2026-07-10: burn as few tokens as possible on things
@@ -354,8 +355,10 @@ Markdown-as-definition-body (see body format above).
       overlap between a reconstructed body and the preview near its heading ⇒
       "check the reconstruction" warning (`textLayerAgreement`, threshold
       tunable by experiment).
-- [ ] **PDF-stage validation** *(next; needs an Anthropic API key — user todo;
-      experiment protocol agreed 2026-07-10, user wants a walkthrough)*:
+- [x] **PDF-stage validation** *(RAN 2026-07-10: E1 — guided+haiku-4-5 — passed
+      the bar on the dual-hosted paper, so per protocol we exited early and
+      E2/E3 (sonnet/opus) never ran. Results at the end of this item; the
+      protocol below is kept for the record)*:
       run the real LLM over the corpus PDFs, dual-hosted paper first
       (2402.09370: arXiv PDF in via the pipeline ↔ its .tex source as ground
       truth — `npm run import-tests` writes the source-side extraction to
@@ -402,6 +405,44 @@ Markdown-as-definition-body (see body format above).
         corpus PDFs already on disk in `import-tests/corpus/`, incl. the
         arXiv-fetched 2402.09370.pdf). Wire an opt-in `import-tests/` PDF
         harness (costs real tokens) once the prompt settles.
+      **RESULTS (2026-07-10, all guided+haiku-4-5; raw scans saved as
+      `import-tests/out/pdf-guided-haiku-<id>.json`):**
+      - **2402.09370 (vs ground truth): PASS.** 76s, $0.12 (70k in / 11k out).
+        27/27 numbered GT blocks recovered (18 definitions + 9 constructions);
+        4 spot-checked bodies faithful word-for-word incl. the longest (2.1k
+        chars) — notation macros substituted but math exact. 20/20 macros
+        katexSafe with sensible semantic names. 7 warnings; the single
+        low-agreement flag was a heuristic false positive (a 2-line body that
+        correctly points at a figure — even rendered `\Cref` as the typeset
+        "Figure 6"). One extra candidate = the paper's informal intro PRC
+        statement (plausible; skippable at select time).
+      - **2021/422 Stacking Sigmas (ePrint-only, manual review): GOOD.** 59s,
+        $0.10. 16 definitions, 18/18 katexSafe. The LLM correctly identified
+        two scout false positives (Definition-4 restatements on pp. 27/34) and
+        explained them in warnings. Zero low-agreement flags. Spot-checked
+        Stackable Σ-Protocol matches the published statement. (Owner's private
+        .tex cross-check still possible if wanted.)
+      - **2025/1565 OPRF (game-box test, manual review): GOOD.** 33s, $0.08.
+        15 candidates (11 def / 1 game / 3 constr), 16/16 katexSafe. Game boxes
+        reconstructed in real cryptocode `\procedure`/`\pcreturn` syntax with
+        every command declared (incl. 2-arg `\game`). Both low-agreement flags
+        were false positives — pseudocode/display-math bodies have no prose for
+        the heuristic to match.
+      **Adopted as default:** `DEFAULT_MODEL = claude-haiku-4-5` in
+      `pdf-extract.ts` (env-overridable via `IMPORT_LLM_MODEL`); frontend
+      `/import` PDF-mode toggle now defaults to `guided`. Unit-test pricing
+      assertions updated. Fixed en route: the `thinking: adaptive` param is now
+      gated on model support — Haiku 4.5 (pre-4.6) rejects it with a 400.
+      **Prompt-tune backlog (small, observed):** (1) degenerate
+      self-declarations of standard commands (`\Pr -> \Pr`) — tell the prompt
+      standard LaTeX/amsmath commands need no declaration; (2) the 40%
+      text-layer agreement threshold false-positives on short or
+      pseudocode-heavy bodies — skip the check when the body/preview carries
+      too little prose (fold into the existing E4 threshold-tuning note);
+      (3) titles come back as plain unicode (κ) vs the source's math — feeds
+      the existing candidate-title-cleanup UX item.
+      **Remaining:** the opt-in `import-tests/` PDF harness, now that the
+      config is settled.
 - [ ] **PDF cost strategy — levers beyond model choice** *(user-raised
       2026-07-10: $1–2/paper "wildly expensive" at scale; complementary, in
       rough order of leverage)*:
@@ -413,8 +454,9 @@ Markdown-as-definition-body (see body format above).
          pages ≈ $0.02–0.06 on Haiku, independent of paper length. Also
          doubles as explicit user verification of exactly what gets sent to
          the API. This is the likely production interactive path.
-      2. **Cheaper model as default** — whatever E3 says survives quality
-         scoring (env-var change only).
+      2. **Cheaper model as default** — DONE 2026-07-10: guided+haiku-4-5
+         survived quality scoring at ~$0.08–0.12/paper and is now the code
+         default (see "PDF-stage validation" results above).
       3. **Batch API for bulk backfill** — 50% off all token costs on
          non-interactive imports; combine with 1–2 for any mass-import job
          (guided-Haiku-batch ≈ $0.08/paper → ~$80 per 1k papers). Not built;

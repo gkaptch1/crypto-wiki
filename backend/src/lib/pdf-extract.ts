@@ -61,7 +61,10 @@ export interface PdfExtraction {
   warnings: string[];
 }
 
-const DEFAULT_MODEL = process.env.IMPORT_LLM_MODEL || 'claude-opus-4-8';
+// Validated 2026-07-10 against the 2402.09370 arXiv-source ground truth:
+// guided+haiku reconstructed 27/27 numbered blocks with faithful bodies and
+// 100% katexSafe macros at ~$0.12/paper (PLAN.md "PDF-stage validation").
+const DEFAULT_MODEL = process.env.IMPORT_LLM_MODEL || 'claude-haiku-4-5';
 
 /** $/MTok input, output — for the estimate we surface per scan. */
 const PRICES: Record<string, { in: number; out: number }> = {
@@ -359,6 +362,15 @@ export type LlmComplete = (args: {
   model: string;
 }) => Promise<{ json: string; inputTokens: number; outputTokens: number }>;
 
+/**
+ * Pre-4.6 models (Haiku 4.5, Sonnet 4.5, Opus ≤4.5) reject
+ * `thinking: {type: 'adaptive'}` with a 400 — omit the param there and the
+ * request runs without thinking, which is fine for a transcription task.
+ */
+function supportsAdaptiveThinking(model: string): boolean {
+  return !/haiku|sonnet-4-5|opus-4-[015]/.test(model);
+}
+
 const anthropicComplete: LlmComplete = async ({ pdfBase64, system, prompt, schema, model }) => {
   let client: Anthropic;
   try {
@@ -377,7 +389,7 @@ const anthropicComplete: LlmComplete = async ({ pdfBase64, system, prompt, schem
     const stream = client.messages.stream({
       model,
       max_tokens: 64000,
-      thinking: { type: 'adaptive' },
+      ...(supportsAdaptiveThinking(model) ? { thinking: { type: 'adaptive' as const } } : {}),
       output_config: { format: { type: 'json_schema', schema } },
       system,
       messages: [

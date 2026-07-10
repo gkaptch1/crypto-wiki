@@ -108,7 +108,7 @@ function ImportPage() {
   const [uploaded, setUploaded] = useState<Record<string, string>>({});
   const [eprintInput, setEprintInput] = useState('');
   const [pdfFile, setPdfFile] = useState<{ name: string; base64: string } | null>(null);
-  const [pdfMode, setPdfMode] = useState<'full' | 'guided'>('full');
+  const [pdfMode, setPdfMode] = useState<'full' | 'guided'>('guided');
   const [scanError, setScanError] = useState<string | null>(null);
 
   // ---- step 2: scan result + selection

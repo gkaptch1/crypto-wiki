@@ -213,9 +213,14 @@ describe('llmExtractFromPdf (injected completion)', () => {
     const complete = fakeComplete(JSON.stringify(EXTRACTION));
     const result = await llmExtractFromPdf(pdf, { pdfName: 'paper.pdf', complete });
     expect(result.candidates).toHaveLength(2);
-    expect(result.llm).toMatchObject({ mode: 'full', inputTokens: 150_000, outputTokens: 20_000 });
-    // 150k × $5/M + 20k × $25/M = $0.75 + $0.50
-    expect(result.llm.estimatedCostUsd).toBeCloseTo(1.25, 4);
+    expect(result.llm).toMatchObject({
+      model: 'claude-haiku-4-5', // the validated default
+      mode: 'full',
+      inputTokens: 150_000,
+      outputTokens: 20_000,
+    });
+    // 150k × $1/M + 20k × $5/M = $0.15 + $0.10
+    expect(result.llm.estimatedCostUsd).toBeCloseTo(0.25, 4);
     const arg = (complete as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(arg.prompt).toContain('[0] Definition 3.1 (Pseudorandom Function) — page 2');
     // scout previews anchor the checklist entries
