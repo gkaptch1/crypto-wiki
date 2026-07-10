@@ -65,6 +65,21 @@ function parseArxivId(input: string): string | null {
   return m ? m[1] : null;
 }
 
+/** Accept "2024/235", an ePrint URL, or "ePrint 2024/235". */
+function parseEprintId(input: string): string | null {
+  const m = input.trim().match(/(\d{4}\/\d{1,6})/);
+  return m ? m[1] : null;
+}
+
+/** File → base64 without blowing the call stack on multi-MB PDFs. */
+async function pdfToBase64(file: File): Promise<string> {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000)
+    bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
 /** Replace every \old with \new in a body, without eating longer names (\enc vs \encode). */
 function renameMacroInBody(body: string, from: string, to: string): string {
   const escaped = from.replace(/\\/g, '\\\\');
@@ -87,10 +102,13 @@ function ImportPage() {
   );
 
   // ---- step 1: source input
-  const [mode, setMode] = useState<'arxiv' | 'upload' | 'paste'>('arxiv');
+  const [mode, setMode] = useState<'arxiv' | 'pdf' | 'upload' | 'paste'>('arxiv');
   const [arxivInput, setArxivInput] = useState('');
   const [pasted, setPasted] = useState('');
   const [uploaded, setUploaded] = useState<Record<string, string>>({});
+  const [eprintInput, setEprintInput] = useState('');
+  const [pdfFile, setPdfFile] = useState<{ name: string; base64: string } | null>(null);
+  const [pdfMode, setPdfMode] = useState<'full' | 'guided'>('full');
   const [scanError, setScanError] = useState<string | null>(null);
 
   // ---- step 2: scan result + selection
@@ -108,6 +126,12 @@ function ImportPage() {
         if (!id) throw new Error('Not a recognizable arXiv id or URL.');
         return importScan({ arxivId: id });
       }
+      if (mode === 'pdf') {
+        if (pdfFile) return importScan({ pdfBase64: pdfFile.base64, pdfName: pdfFile.name, pdfMode });
+        const id = parseEprintId(eprintInput);
+        if (!id) throw new Error('Not a recognizable ePrint id or URL (e.g. 2024/235).');
+        return importScan({ eprintId: id, pdfMode });
+      }
       const files = mode === 'paste' ? { 'main.tex': pasted } : uploaded;
       if (Object.keys(files).length === 0 || (mode === 'paste' && !pasted.trim())) {
         throw new Error(mode === 'paste' ? 'Paste some LaTeX first.' : 'Add at least one file.');
@@ -115,13 +139,22 @@ function ImportPage() {
       return importScan({ files });
     },
     onSuccess: (result) => {
-      const id = mode === 'arxiv' ? parseArxivId(arxivInput) : null;
+      const arxId = mode === 'arxiv' ? parseArxivId(arxivInput) : null;
+      const epId = mode === 'pdf' && !pdfFile ? parseEprintId(eprintInput) : null;
       setScan(result);
-      setSource(id ? `arXiv:${id}` : 'uploaded source');
+      setSource(
+        arxId
+          ? `arXiv:${arxId}`
+          : epId
+            ? `ePrint ${epId}`
+            : mode === 'pdf'
+              ? `${pdfFile?.name ?? 'uploaded PDF'} (LLM extraction)`
+              : 'uploaded source',
+      );
       setPicks({});
       setExpanded({});
       setResults({});
-      setCitation({ paper: '', authors: '', year: '', eprint: id ?? '' });
+      setCitation({ paper: '', authors: '', year: '', eprint: epId ?? arxId ?? '' });
     },
     onError: (err) => setScanError(err.message),
   });
@@ -216,7 +249,9 @@ function ImportPage() {
           await createFormulation(pick.defSlug, { slug: pick.fSlug, citation: cite });
           await createRevision(pick.defSlug, pick.fSlug, {
             bodyLatex: body,
-            commentaryMd: `*Imported from ${source} (\`${candidate.file}:${candidate.line}\`).*`,
+            commentaryMd: `*Imported from ${source} (\`${
+              scan!.llm ? `${candidate.file} p.${candidate.line}` : `${candidate.file}:${candidate.line}`
+            }\`).*`,
             macros,
             localMacros,
           });
@@ -277,6 +312,7 @@ function ImportPage() {
           {(
             [
               ['arxiv', 'arXiv id'],
+              ['pdf', 'ePrint / PDF (LLM)'],
               ['upload', 'Upload .tex files'],
               ['paste', 'Paste LaTeX'],
             ] as const
@@ -305,6 +341,56 @@ function ImportPage() {
               onChange={(e) => setArxivInput(e.target.value)}
             />
           </label>
+        )}
+
+        {mode === 'pdf' && (
+          <div className="space-y-2 text-sm">
+            <label className="block">
+              ePrint id or URL (the server fetches the PDF)
+              <input
+                className={monoInputCls}
+                placeholder="2024/235 or https://eprint.iacr.org/2024/235"
+                value={eprintInput}
+                onChange={(e) => setEprintInput(e.target.value)}
+              />
+            </label>
+            <div>
+              …or upload a PDF:{' '}
+              <input
+                type="file"
+                accept=".pdf,application/pdf"
+                onChange={async (e) => {
+                  const f = e.target.files?.[0];
+                  setPdfFile(f ? { name: f.name, base64: await pdfToBase64(f) } : null);
+                }}
+              />
+              {pdfFile && (
+                <span className="text-gray-600">
+                  {pdfFile.name}{' '}
+                  <button type="button" className="underline" onClick={() => setPdfFile(null)}>
+                    clear
+                  </button>
+                </span>
+              )}
+            </div>
+            <label className="flex items-start gap-2">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={pdfMode === 'guided'}
+                onChange={(e) => setPdfMode(e.target.checked ? 'guided' : 'full')}
+              />
+              <span>
+                Guided mode: send only the pages where a text scan finds candidate headings —
+                much cheaper on long papers, but misses blocks the text layer can't see.
+              </span>
+            </label>
+            <p className="text-gray-500">
+              PDF extraction reconstructs LaTeX with an LLM (the PDF is sent to the Anthropic
+              API); a scan takes a few minutes and costs tokens. Everything still lands as
+              drafts for review.
+            </p>
+          </div>
         )}
 
         {mode === 'upload' && (
@@ -350,7 +436,11 @@ function ImportPage() {
             scanMut.mutate();
           }}
         >
-          {scanMut.isPending ? 'Scanning…' : 'Scan'}
+          {scanMut.isPending
+            ? mode === 'pdf'
+              ? 'Scanning with LLM (can take minutes)…'
+              : 'Scanning…'
+            : 'Scan'}
         </button>
       </section>
 
@@ -362,6 +452,15 @@ function ImportPage() {
             <strong>{scan.candidates.length}</strong> candidate(s),{' '}
             <strong>{scan.macros.length}</strong> macros ({Object.keys(scan.macroMap).length}{' '}
             usable as-is).
+            {scan.llm && (
+              <>
+                {' '}
+                LLM: <strong>{scan.llm.model}</strong> ({scan.llm.mode} mode),{' '}
+                {scan.llm.inputTokens.toLocaleString()} in /{' '}
+                {scan.llm.outputTokens.toLocaleString()} out tokens ≈ $
+                {scan.llm.estimatedCostUsd.toFixed(2)}.
+              </>
+            )}
           </div>
 
           {scan.warnings.length > 0 && (
@@ -407,7 +506,9 @@ function ImportPage() {
                       {candidate.kind === 'procedure' ? 'game box' : candidate.envName}
                     </span>
                     <span className="ml-auto text-xs text-gray-500 font-mono">
-                      {candidate.file}:{candidate.line}
+                      {scan.llm
+                        ? `${candidate.file} p.${candidate.line}`
+                        : `${candidate.file}:${candidate.line}`}
                     </span>
                     <span className="text-xs text-gray-500">
                       {candidate.usedMacros.length} macro{candidate.usedMacros.length === 1 ? '' : 's'}

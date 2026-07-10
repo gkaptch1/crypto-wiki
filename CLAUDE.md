@@ -7,9 +7,12 @@ design choices. Phases 0–2 done (revive + spike; core wiki loop incl. shim v1 
 regression harness; accounts & invited write via better-auth). Phases re-ordered
 2026-07-09: **Phase 3 is now paper import** (deterministic LaTeX extractor →
 macro set + draft formulations; test corpus in PLAN.md). Extractor, corpus
-harness, and the scan-then-select importer surface (`POST /import/scan` +
-`/import` page) are built; remaining: human-in-the-loop refinement UX, PDF/LLM
-stage. Production rendering +
+harness, the scan-then-select importer surface (`POST /import/scan` +
+`/import` page), and the PDF/LLM stage (deterministic pdfjs scout → Claude
+reconstruction → validated through `extractFromLatex`; needs
+`ANTHROPIC_API_KEY`) are built; remaining: PDF-stage validation on the real
+corpus (needs the API key), citation auto-import, human-in-the-loop
+refinement UX. Production rendering +
 deploy polish moved to Phase 4 (blocked on university VM / OAuth creds / Docker
 anyway). Google/GitHub OAuth app credentials are NOT yet created — dev uses the
 password fallback below.
@@ -26,9 +29,14 @@ password fallback below.
 - `backend/` — Fastify + Prisma 7 + PostgreSQL + better-auth. App in `src/app.ts`
   (buildApp, used by tests), routes in `src/routes/` (permalinks / definitions /
   macro-sets / auth / invitations / me / import / macro-names — `POST
-  /import/scan` is the importer's scan step: `files` map or `arxivId` in,
-  extraction out, creates nothing; arXiv fetch + gunzip + minimal ustar reader
-  in `src/lib/arxiv.ts`; `/macro-names` is the macro-name registry),
+  /import/scan` is the importer's scan step: `files` map, `arxivId`, `eprintId`,
+  or `pdfBase64` in, extraction out, creates nothing; arXiv fetch + gunzip +
+  minimal ustar reader in `src/lib/arxiv.ts`; PDF/LLM stage in `src/lib/`:
+  `eprint.ts` (PDF fetch), `pdf-scout.ts` (pdfjs text-layer heading finder,
+  zero tokens), `pdf-extract.ts` (Claude reconstruction, JSON-schema-forced,
+  `full`/`guided` modes, output validated by running it back through
+  `extractFromLatex`; injectable `complete` seam for tests);
+  `/macro-names` is the macro-name registry),
   better-auth config + role-assignment hook
   in `src/lib/auth.ts`, session guards (`requireEditor` etc.) in `src/lib/session.ts`,
   schema in `prisma/schema.prisma`, seed in `prisma/seed.ts`, tests in `test/`.
@@ -63,7 +71,9 @@ password fallback below.
   (comma list; admin on first sign-in), `GOOGLE_/GITHUB_CLIENT_ID/SECRET` (a provider
   is disabled while its creds are empty), `AUTH_PASSWORD_SIGNIN=1` — dev/test-only
   email+password strategy (powers the /signin dev form and how tests mint sessions;
-  NEVER set in production).
+  NEVER set in production), `ANTHROPIC_API_KEY` — PDF import's LLM stage (unset →
+  503 LLM_NOT_CONFIGURED on PDF scans only; `IMPORT_LLM_MODEL` overrides the
+  default claude-opus-4-8).
 
 ## Gotchas (learned the hard way)
 - **`prisma migrate dev` cannot run non-interactively.** Generate migration SQL with
@@ -91,6 +101,10 @@ password fallback below.
 - Anonymous macro sets must never serialize owner OR timestamps, and no endpoint
   may enumerate them. `test/anonymous-audit.test.ts` substring-scans every public
   surface that can carry a macro set — extend it when adding such endpoints.
+- **eprint.iacr.org bot-blocks server-side fetches** (403 + HTML challenge even
+  for plain curl, any user-agent) — the importer's `eprintId` path may fail from
+  most networks; uploading the PDF is the reliable path. arXiv PDFs
+  (`arxiv.org/pdf/<id>`) download fine.
 
 ## Domain model (Phases 1–2)
 `Definition` (concept; unique url `slug` + display `title`; categories) → many

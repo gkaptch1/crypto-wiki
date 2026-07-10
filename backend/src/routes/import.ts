@@ -2,11 +2,14 @@ import { schemas, extractFromLatex } from '@crypto-wiki/shared';
 import { sendError } from '../lib/errors';
 import { requireEditor } from '../lib/session';
 import { ArxivFetchError, fetchArxivSource } from '../lib/arxiv';
+import { EprintFetchError, fetchEprintPdf, MAX_PDF_BYTES } from '../lib/eprint';
+import { llmExtractFromPdf, PdfImportError } from '../lib/pdf-extract';
 import type { AppInstance } from '../app';
 
 // Paper importer, step 1 of the scan-then-select flow (PLAN.md Phase 3):
 // submit LaTeX source (pasted/uploaded files, or an arXiv id the server
-// fetches), get back the extraction — candidate definitions, the macro
+// fetches) OR a PDF (an ePrint id the server fetches, or an upload — the
+// PDF/LLM stage), get back the extraction — candidate definitions, the macro
 // table, theorem envs, warnings. **Nothing is created here.** Step 2 (the
 // select) goes through the ordinary editor CRUD, which is what enforces
 // slugs, roles, and draft-only creation.
@@ -30,16 +33,58 @@ export async function importRoutes(app: AppInstance) {
           404: schemas.ApiError,
           422: schemas.ApiError,
           502: schemas.ApiError,
+          503: schemas.ApiError,
           ...AUTH_ERRORS,
         },
       },
     },
     async (request, reply) => {
-      const { files, mainFile, arxivId } = request.body;
-      if ((files === undefined) === (arxivId === undefined)) {
-        return sendError(reply, 400, 'BAD_INPUT', 'Provide exactly one of "files" or "arxivId".');
+      const { files, mainFile, arxivId, eprintId, pdfBase64, pdfName, pdfMode } = request.body;
+      const inputs = [files, arxivId, eprintId, pdfBase64].filter((v) => v !== undefined);
+      if (inputs.length !== 1) {
+        return sendError(
+          reply,
+          400,
+          'BAD_INPUT',
+          'Provide exactly one of "files", "arxivId", "eprintId", or "pdfBase64".',
+        );
       }
 
+      // ---- PDF/LLM stage: ePrint fetch-by-id or an uploaded PDF
+      if (eprintId !== undefined || pdfBase64 !== undefined) {
+        let pdf: Buffer;
+        let name: string;
+        if (eprintId !== undefined) {
+          try {
+            pdf = await fetchEprintPdf(eprintId);
+          } catch (err) {
+            if (err instanceof EprintFetchError) {
+              return sendError(reply, err.statusCode, err.code, err.message);
+            }
+            throw err;
+          }
+          name = `eprint-${eprintId.replace('/', '-')}.pdf`;
+        } else {
+          pdf = Buffer.from(pdfBase64!, 'base64');
+          if (pdf.subarray(0, 4).toString('latin1') !== '%PDF') {
+            return sendError(reply, 422, 'BAD_PDF', 'That upload is not a PDF.');
+          }
+          if (pdf.length > MAX_PDF_BYTES) {
+            return sendError(reply, 422, 'PDF_TOO_LARGE', 'The PDF is too large to import.');
+          }
+          name = pdfName?.trim() || 'uploaded.pdf';
+        }
+        try {
+          return await llmExtractFromPdf(pdf, { pdfName: name, mode: pdfMode });
+        } catch (err) {
+          if (err instanceof PdfImportError) {
+            return sendError(reply, err.statusCode, err.code, err.message);
+          }
+          throw err;
+        }
+      }
+
+      // ---- deterministic LaTeX-source paths
       let sources: Record<string, string>;
       if (arxivId !== undefined) {
         try {

@@ -327,10 +327,14 @@ export const ArxivId = Type.String({
   maxLength: 40,
 });
 
+/** IACR ePrint paper id, e.g. "2024/235". */
+export const EprintId = Type.String({ pattern: '^\\d{4}/\\d{1,6}$', maxLength: 12 });
+
 export const ImportScanBody = Type.Object({
   /**
    * filename → LaTeX content (paste/upload path). Exactly one of `files` /
-   * `arxivId` must be present — enforced in the handler, not the schema.
+   * `arxivId` / `eprintId` / `pdfBase64` must be present — enforced in the
+   * handler, not the schema.
    */
   files: Type.Optional(
     Type.Record(Type.String(), Type.String({ maxLength: 5_000_000 }), {
@@ -341,6 +345,24 @@ export const ImportScanBody = Type.Object({
   mainFile: Type.Optional(Type.String({ maxLength: 300 })),
   /** Fetch-by-id convenience path: the server downloads arxiv.org/e-print/<id>. */
   arxivId: Type.Optional(ArxivId),
+  /**
+   * PDF/LLM stage: the server downloads eprint.iacr.org/<id>.pdf and runs the
+   * LLM extractor over it (ePrint serves no LaTeX source).
+   */
+  eprintId: Type.Optional(EprintId),
+  /**
+   * PDF/LLM stage, upload path: a base64-encoded PDF (≤ ~20 MB decoded; the
+   * cap keeps the request under the route's 32 MB body limit).
+   */
+  pdfBase64: Type.Optional(Type.String({ maxLength: 28_000_000 })),
+  /** Display name for the uploaded PDF, used in provenance stamps. */
+  pdfName: Type.Optional(Type.String({ maxLength: 200 })),
+  /**
+   * PDF/LLM stage only. 'full' ships the whole PDF to the LLM (baseline);
+   * 'guided' ships only the pages where the deterministic text scan found
+   * candidate headings — much cheaper on long papers. Default: full.
+   */
+  pdfMode: Type.Optional(Type.Union([Type.Literal('full'), Type.Literal('guided')])),
 });
 
 export const ImportMacroKind = Type.Union([
@@ -401,6 +423,16 @@ export const ImportScanResult = Type.Object({
   candidates: Type.Array(ImportCandidate),
   scannedFiles: Type.Array(Type.String()),
   warnings: Type.Array(Type.String()),
+  /** Present when the scan went through the PDF/LLM stage: what it cost. */
+  llm: Type.Optional(
+    Type.Object({
+      model: Type.String(),
+      mode: Type.Union([Type.Literal('full'), Type.Literal('guided')]),
+      inputTokens: Type.Integer(),
+      outputTokens: Type.Integer(),
+      estimatedCostUsd: Type.Number(),
+    }),
+  ),
 });
 
 export const ListDefinitionsQuery = Type.Object({

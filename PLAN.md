@@ -301,15 +301,138 @@ Markdown-as-definition-body (see body format above).
       14+10 backend tests (`test/import.test.ts`, `test/layered-macros.test.ts`);
       Playwright-driven end to end (paste and arXiv flows, incl. the real
       2402.09370, and the rename→publish→restyle-vs-sealed loop).
+- [ ] **Citation auto-import + link to the paper** *(user, 2026-07-09)*: imports
+      should arrive citing their source. arXiv exposes BibTeX at
+      `arxiv.org/bibtex/<id>` and ePrint shows a BibTeX block on every paper
+      page — when a scan comes from an `arxivId` (and later, when the PDF stage
+      takes ePrint links), fetch + parse it and prefill the formulation's
+      citation fields (`citePaper`, `citeAuthors`, `citeVenue`, `citeYear`,
+      `citeDoi`, `citeEprint`) in the select step. For pasted-source imports
+      (no id), accept a pasted BibTeX entry or a DBLP key
+      (`dblp.org/rec/<key>.bib`) as the citation source. Definition pages
+      should also **link out to the paper itself** — derivable from
+      `citeEprint` / arXiv id / DOI today; anything else needs a `citeUrl`
+      column (migration).
 - [ ] **Test corpus** of real papers (below): `.tex`-source papers for the
       deterministic importer, ePrint-only PDFs for the PDF/LLM stage, and one
       dual-hosted paper (ePrint PDF + arXiv source) whose source is ground truth for
       validating PDF extraction. Shim failures found while importing become
       `render-tests/` fragments. *Starting six wired into `import-tests/`; PDF-stage
       papers pending that pipeline.*
-- [ ] **LLM-assisted importer**: from a PDF/eprint link, extract candidate definitions +
-      notation. Always produces human-reviewed drafts, never auto-publishes. The
-      deterministic parser doubles as the LLM's validation harness.
+- [x] **LLM-assisted importer** — first cut BUILT (2026-07-10): from an ePrint id
+      or an uploaded PDF, extract candidate definitions + notation. Hybrid by
+      design (user, 2026-07-10: burn as few tokens as possible on things
+      traditional tools can do): a **deterministic scout** (`pdf-scout.ts`,
+      pdfjs text layer, zero tokens) locates definition-like headings first —
+      on the real 2402.09370 PDF it finds all 18 ground-truth definitions + 9
+      constructions with 3 noise entries — then the LLM
+      (`pdf-extract.ts`, claude-opus-4-8, JSON-schema-forced output, streaming)
+      only does the irreducible part: faithful LaTeX reconstruction + macro
+      declarations. Its JSON is assembled into a synthetic .tex and run through
+      `extractFromLatex` — the deterministic parser as validation harness, as
+      planned — so the response is the same ImportScanResult the select step
+      already consumes, with provenance remapped to PDF pages and scout-vs-LLM
+      mismatches surfacing as warnings. Two modes: `full` (whole PDF, the
+      learn-the-limitations baseline) and `guided` (pdf-lib sub-PDF of scout
+      pages +1 spillover; 25/71 pages on 2402.09370 ≈ 65% input-token cut).
+      Every scan reports model/mode/token usage + estimated $ in the response.
+      Needs `ANTHROPIC_API_KEY` in backend/.env (else 503 LLM_NOT_CONFIGURED;
+      all other paths unaffected). 20 backend tests (`test/pdf-import.test.ts`).
+      **Found en route: eprint.iacr.org bot-blocks server-side fetches (403
+      challenge page even for curl)** — so upload-a-PDF is the reliable path
+      (mirroring paste-your-own-.tex for source); the eprintId fetch path stays
+      in case other networks fare better. Always drafts, never auto-publishes.
+      *(Same-day addition, user question → decision:)* we do **NOT** feed our
+      own text extraction alongside the PDF — the Messages API already
+      extracts the text layer server-side and hands the model text + page
+      images for every document block, so it would be redundant tokens; and
+      text-*instead of*-PDF was rejected because garbled text-layer math is
+      precisely what the vision channel is there to fix. What we built instead
+      (both zero-token): the scout's text-layer **previews are embedded in the
+      checklist** (anchors block-matching; prompt says math there is garbled,
+      locate-only) and a **text-layer agreement post-check** — <40% prose
+      overlap between a reconstructed body and the preview near its heading ⇒
+      "check the reconstruction" warning (`textLayerAgreement`, threshold
+      tunable by experiment).
+- [ ] **PDF-stage validation** *(next; needs an Anthropic API key — user todo;
+      experiment protocol agreed 2026-07-10, user wants a walkthrough)*:
+      run the real LLM over the corpus PDFs, dual-hosted paper first
+      (2402.09370: arXiv PDF in via the pipeline ↔ its .tex source as ground
+      truth — `npm run import-tests` writes the source-side extraction to
+      `import-tests/out/2402.09370.json`; the arXiv PDF downloads fine from
+      `arxiv.org/pdf/2402.09370`).
+      **Framing revised 2026-07-10 (user): cost-per-paper is a PRIMARY axis,
+      not a readout.** Full-PDF-through-Opus lands at ~$1–2/paper — infeasible
+      at scale (target corpus is hundreds–thousands of papers; target cost
+      more like $0.05–0.15/paper). **Order revised same day (user): cheapest
+      config FIRST, escalate only on failure — early exit means the expensive
+      runs may never happen.** This works because the ground truth (the
+      deterministic extraction of the paper's own arXiv source) is an
+      ABSOLUTE quality bar — no Opus baseline is needed to judge a cheap
+      config against it.
+      **Scoring, every rung, vs `import-tests/out/2402.09370.json`**:
+      candidate coverage (18 definitions + 9 constructions), body fidelity
+      (spot-check + agreement warnings), macro quality (katexSafe rate,
+      sensible semantic names), token cost (the scan returns
+      `llm.{inputTokens,outputTokens,estimatedCostUsd}`).
+      **Pass bar (early exit)**: ground-truth candidates all present,
+      spot-checked bodies faithful, no agreement-warning flood → stop
+      climbing, adopt that config as the default, go to prompt-tune +
+      ePrint papers. Model swaps are zero code (`IMPORT_LLM_MODEL` env var);
+      reconstruction is a vision/transcription task, not deep reasoning, so
+      a small model is genuinely plausible.
+      - **E1 — guided + haiku-4-5 ($1/$5 per MTok, ~$0.16 this paper)**:
+        cheapest plausible config, `pdfMode: "guided"` (scout subset =
+        25/71 pages ≈65% input cut).
+      - **E2 (only if E1 fails the bar) — guided + sonnet ($3/$15,
+        ~$0.50)**. If Haiku and Sonnet fail the SAME way, suspect the
+        mode/prompt rather than the model — jump to E4 before spending more
+        on bigger models.
+      - **E3 (only if E2 fails) — guided + opus-4-8 ($5/$25, ~$0.80)**; and
+        as the last resort, one full-mode opus run (~$1.25) — the diagnostic
+        that separates "model can't reconstruct" from "guided subset is
+        missing needed context".
+      - **E4 (at any rung, when failures look like block-matching or
+        fidelity problems)**: ablate the preview-anchored checklist to see
+        if it earns its place; likewise revisit the 40% agreement threshold
+        against observed scores.
+      - Prompt-tune on whatever diverges; then the ePrint-only picks with
+        the passing config (2021/422 Stacking Sigmas — owner holds the
+        private .tex to cross-check; 2025/1565 OPRF game boxes; all three
+        corpus PDFs already on disk in `import-tests/corpus/`, incl. the
+        arXiv-fetched 2402.09370.pdf). Wire an opt-in `import-tests/` PDF
+        harness (costs real tokens) once the prompt settles.
+- [ ] **PDF cost strategy — levers beyond model choice** *(user-raised
+      2026-07-10: $1–2/paper "wildly expensive" at scale; complementary, in
+      rough order of leverage)*:
+      1. **Scout-first user selection** (moderate code; merges into the
+         human-in-the-loop UX item below): split the PDF scan into scout
+         (free, zero tokens — already built) → user ticks the candidates they
+         actually want → LLM extracts ONLY the selected blocks' pages. Editors
+         rarely want all ~27 candidates; 3–5 selections spanning a handful of
+         pages ≈ $0.02–0.06 on Haiku, independent of paper length. Also
+         doubles as explicit user verification of exactly what gets sent to
+         the API. This is the likely production interactive path.
+      2. **Cheaper model as default** — whatever E3 says survives quality
+         scoring (env-var change only).
+      3. **Batch API for bulk backfill** — 50% off all token costs on
+         non-interactive imports; combine with 1–2 for any mass-import job
+         (guided-Haiku-batch ≈ $0.08/paper → ~$80 per 1k papers). Not built;
+         only worth it if a true bulk backfill materializes.
+      4. **Open-source academic-OCR spike** (after E1 sets the quality bar):
+         purpose-built PDF→LaTeX/markdown models — olmOCR (AllenAI),
+         Nougat (Meta), Marker — run locally at zero marginal cost and target
+         exactly this task (math OCR from scholarly PDFs). Benchmark against
+         the same 2402.09370 ground truth; known risk is math hallucination
+         on out-of-distribution content. If good, they become a free stage-1
+         whose text output feeds `extractFromLatex` directly or a cheap LLM
+         cleanup pass over candidate blocks only (text-in is far cheaper
+         than PDF-in). Fits the deterministic-before-LLM principle: local
+         model ≠ deterministic, but zero marginal cost changes the calculus.
+      5. **Reality check on scale**: papers with arXiv source stay on the
+         free deterministic path forever — the PDF/LLM stage only pays for
+         the ePrint-only subset, so the effective per-corpus cost is lower
+         than per-paper × corpus size.
 - [ ] **Human-in-the-loop import UX** *(build after the extraction pipeline works)*:
       importing is a review loop, not a batch job — pull in a link/PDF/`.tex`, the
       pipeline proposes candidate definitions + a macro set, and the user gives
@@ -423,6 +546,31 @@ a "importer finds nothing" case).
 - [ ] Productionize Tier 2 in its revised roles: sandboxed render container, on-demand
       + LRU compile cache for escape-hatch bodies, and wiring the existing
       `render-tests/` harness into CI and the publish flow.
+- [ ] **Ideal-functionality rendering** *(user, 2026-07-09)*: UC/simulation-based
+      definitions are typeset as a titled framed box ("Functionality
+      $\mathcal{F}_{\mathsf{ZK}}$" + itemized behaviors), but there is no
+      standard package — every paper rolls its own (`mdframed`/`tcolorbox`/
+      figure+framed). Plan: curate **one site `functionality` environment**,
+      rendered by the Tier-1 shim as a styled box (title bar, numbered
+      behavior list), shipped with a matching real-LaTeX implementation in a
+      small `crypto-wiki.sty` so bodies stay compilable (Tier-2 escape hatch,
+      regression harness, and paper export all need it) — this makes the
+      curated-environments open question concrete rather than preview-only.
+      Add a `render-tests/` fragment; the importer maps common hand-rolled
+      patterns onto the site environment. Test material: corpus paper
+      1909.13770 (ideal/real simulation-based MPC definitions).
+- [ ] **Additive ⇄ multiplicative group notation** *(user, 2026-07-09)*: layered
+      macros are the mechanism; what's missing is a content convention, because
+      the switch restructures expressions ($g^x$ vs. $[x]G$) — plain renames
+      can't do it. Write group expressions via registered semantic macros
+      (e.g. `\gexp{g}{x}`, `\ggen`, `\gmul`) in MacroName, and ship two
+      site-curated notation sets: `multiplicative-notation` (`\gexp` →
+      `#1^{#2}`, `\ggen` → `g`) and `additive-notation` (`\gexp` → `[#2]#1`,
+      `\ggen` → `G`). The existing macro-set switcher then flips a whole
+      definition; consider a dedicated one-click toggle when a definition's
+      formulation pairs with these sets. **Pilot: the seeded DDH entry**, whose
+      body currently hardcodes `g^x, g^y, g^{xy}` — retrofit it to the
+      semantic macros as the worked example.
 - [ ] "Cite this" widget: copies a LaTeX snippet (`\href`/footnote or a provided
       `\defcite` macro) with the pinned permalink + chosen macro set.
 - [ ] og-image/meta previews so links unfurl nicely.
@@ -442,7 +590,10 @@ a "importer finds nothing" case).
 ## Open questions
 - Which site-provided environments do we curate for the Tier-1/editor preview
   (definition box, game box styling)? *Deferred by user until later — Tier 2 runs
-  real LaTeX regardless, so this only affects preview quality.*
+  real LaTeX regardless, so this only affects preview quality.* *(2026-07-09:
+  first concrete answer — a `functionality` environment for ideal
+  functionalities, see the Phase 4 item; that one is NOT preview-only since no
+  standard package exists, so it needs a paired `crypto-wiki.sty`.)*
 - Search: Postgres full-text is likely enough at this scale — revisit only if not.
 
 ## Answered
