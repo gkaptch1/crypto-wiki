@@ -40,6 +40,7 @@ function citationData(c?: CitationInput) {
   if (c.year !== undefined) out.citeYear = c.year;
   if (c.doi !== undefined) out.citeDoi = c.doi;
   if (c.eprint !== undefined) out.citeEprint = c.eprint;
+  if (c.url !== undefined) out.citeUrl = c.url;
   return out;
 }
 

@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import type { CitationInput, ImportScanResult } from '@crypto-wiki/shared';
+import type { CitationInput, CitationLookupBody, ImportScanResult } from '@crypto-wiki/shared';
 import {
   createDefinition,
   createFormulation,
@@ -10,6 +10,7 @@ import {
   getDefinitions,
   getMacroNames,
   importScan,
+  lookupCitation,
 } from '../api/definitions';
 import { ApiRequestError } from '../api/client';
 import RequireEditor from '../components/RequireEditor';
@@ -88,6 +89,15 @@ function renameMacroInBody(body: string, from: string, to: string): string {
 
 const MACRO_NAME_RE = /^\\[a-zA-Z]+$/;
 
+const EMPTY_CITATION = { paper: '', authors: '', venue: '', year: '', doi: '', eprint: '', url: '' };
+
+/** A pasted BibTeX entry (starts with @) vs a DBLP key/URL. */
+function lookupInputFor(raw: string): CitationLookupBody | null {
+  const s = raw.trim();
+  if (!s) return null;
+  return s.startsWith('@') ? { bibtex: s } : { dblpKey: s };
+}
+
 const inputCls = 'mt-1 w-full border border-gray-300 rounded px-2 py-1.5';
 const monoInputCls = `${inputCls} font-mono`;
 const buttonCls = 'bg-black text-white rounded px-4 py-2 text-sm disabled:opacity-50';
@@ -116,8 +126,26 @@ function ImportPage() {
   const [source, setSource] = useState('');
   const [picks, setPicks] = useState<Record<number, Pick>>({});
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
-  const [citation, setCitation] = useState({ paper: '', authors: '', year: '', eprint: '' });
+  const [citation, setCitation] = useState(EMPTY_CITATION);
+  const [citeLookup, setCiteLookup] = useState('');
   const [results, setResults] = useState<Record<number, ItemResult>>({});
+
+  // Fill only the fields the lookup found, leaving anything the user already typed.
+  const applyCitation = (c: CitationInput) =>
+    setCitation((prev) => ({
+      paper: c.paper ?? prev.paper,
+      authors: c.authors ?? prev.authors,
+      venue: c.venue ?? prev.venue,
+      year: c.year != null ? String(c.year) : prev.year,
+      doi: c.doi ?? prev.doi,
+      eprint: c.eprint ?? prev.eprint,
+      url: c.url ?? prev.url,
+    }));
+
+  const citationMut = useMutation({
+    mutationFn: (body: CitationLookupBody) => lookupCitation(body),
+    onSuccess: (res) => applyCitation(res.citation),
+  });
 
   const scanMut = useMutation({
     mutationFn: () => {
@@ -154,7 +182,12 @@ function ImportPage() {
       setPicks({});
       setExpanded({});
       setResults({});
-      setCitation({ paper: '', authors: '', year: '', eprint: epId ?? arxId ?? '' });
+      setCitation(EMPTY_CITATION);
+      setCiteLookup('');
+      // Auto-fetch the citation for a known id; pasted/uploaded imports use the
+      // "Look up citation" box below instead.
+      if (arxId) citationMut.mutate({ arxivId: arxId });
+      else if (epId) citationMut.mutate({ eprintId: epId });
     },
     onError: (err) => setScanError(err.message),
   });
@@ -219,7 +252,10 @@ function ImportPage() {
       const cite: CitationInput = {};
       if (citation.paper.trim()) cite.paper = citation.paper.trim();
       if (citation.authors.trim()) cite.authors = citation.authors.trim();
+      if (citation.venue.trim()) cite.venue = citation.venue.trim();
       if (citation.eprint.trim()) cite.eprint = citation.eprint.trim();
+      if (citation.doi.trim()) cite.doi = citation.doi.trim();
+      if (citation.url.trim()) cite.url = citation.url.trim();
       const year = parseInt(citation.year, 10);
       if (!Number.isNaN(year)) cite.year = year;
 
@@ -661,9 +697,46 @@ function ImportPage() {
             <div className="border border-gray-200 rounded-lg p-4 space-y-3 max-w-2xl">
               <h2 className="font-semibold">Import {importable.length} selected as drafts</h2>
 
+              <p className="text-xs text-gray-600">
+                The same citation is stamped on every formulation you import.
+                {citationMut.isPending && ' Looking up citation…'}
+                {!citationMut.isPending && citationMut.data && (
+                  <span className="text-green-700"> Prefilled from {citationMut.data.source}.</span>
+                )}
+                {citationMut.isError && (
+                  <span className="text-amber-700">
+                    {' '}
+                    Couldn’t fetch a citation automatically ({(citationMut.error as Error).message}) — paste
+                    BibTeX or fill the fields below.
+                  </span>
+                )}
+              </p>
+
+              {/* Manual citation source: pasted BibTeX or a DBLP key (arXiv/ePrint
+                  scans prefill automatically above). */}
+              <div className="flex gap-2 items-start">
+                <textarea
+                  className={`${monoInputCls} h-16 text-xs`}
+                  placeholder="Paste a BibTeX entry, or a DBLP key / URL (e.g. conf/crypto/GoelGHK22)…"
+                  value={citeLookup}
+                  onChange={(e) => setCiteLookup(e.target.value)}
+                />
+                <button
+                  type="button"
+                  className="shrink-0 border border-gray-300 rounded px-3 py-1.5 text-sm hover:border-black disabled:opacity-50"
+                  disabled={citationMut.isPending || !lookupInputFor(citeLookup)}
+                  onClick={() => {
+                    const body = lookupInputFor(citeLookup);
+                    if (body) citationMut.mutate(body);
+                  }}
+                >
+                  Look up
+                </button>
+              </div>
+
               <fieldset className="grid gap-3 md:grid-cols-2 text-sm">
-                <label className="block">
-                  Paper title (citation on each formulation)
+                <label className="block md:col-span-2">
+                  Paper title
                   <input
                     className={inputCls}
                     value={citation.paper}
@@ -679,6 +752,14 @@ function ImportPage() {
                   />
                 </label>
                 <label className="block">
+                  Venue
+                  <input
+                    className={inputCls}
+                    value={citation.venue}
+                    onChange={(e) => setCitation({ ...citation, venue: e.target.value })}
+                  />
+                </label>
+                <label className="block">
                   Year
                   <input
                     className={inputCls}
@@ -687,11 +768,27 @@ function ImportPage() {
                   />
                 </label>
                 <label className="block">
-                  ePrint / arXiv id
+                  Paper URL (link on the definition page)
+                  <input
+                    className={monoInputCls}
+                    value={citation.url}
+                    onChange={(e) => setCitation({ ...citation, url: e.target.value })}
+                  />
+                </label>
+                <label className="block">
+                  ePrint id (e.g. 2024/235)
                   <input
                     className={monoInputCls}
                     value={citation.eprint}
                     onChange={(e) => setCitation({ ...citation, eprint: e.target.value })}
+                  />
+                </label>
+                <label className="block">
+                  DOI
+                  <input
+                    className={monoInputCls}
+                    value={citation.doi}
+                    onChange={(e) => setCitation({ ...citation, doi: e.target.value })}
                   />
                 </label>
               </fieldset>

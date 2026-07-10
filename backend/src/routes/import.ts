@@ -4,6 +4,7 @@ import { requireEditor } from '../lib/session';
 import { ArxivFetchError, fetchArxivSource } from '../lib/arxiv';
 import { EprintFetchError, fetchEprintPdf, MAX_PDF_BYTES } from '../lib/eprint';
 import { llmExtractFromPdf, PdfImportError } from '../lib/pdf-extract';
+import { resolveCitation, CitationFetchError } from '../lib/citation';
 import type { AppInstance } from '../app';
 
 // Paper importer, step 1 of the scan-then-select flow (PLAN.md Phase 3):
@@ -107,6 +108,45 @@ export async function importRoutes(app: AppInstance) {
       } catch (err) {
         // the only throw in extractFromLatex: mainFile not among the inputs
         return sendError(reply, 400, 'BAD_INPUT', (err as Error).message);
+      }
+    },
+  );
+
+  // Citation auto-import: resolve an arXiv/ePrint/DBLP id or pasted BibTeX into
+  // citation fields the select step prefills. Creates nothing.
+  app.post(
+    '/import/citation',
+    {
+      preHandler: requireEditor,
+      schema: {
+        body: schemas.CitationLookupBody,
+        response: {
+          200: schemas.CitationLookupResult,
+          400: schemas.ApiError,
+          404: schemas.ApiError,
+          502: schemas.ApiError,
+          ...AUTH_ERRORS,
+        },
+      },
+    },
+    async (request, reply) => {
+      const { arxivId, eprintId, dblpKey, bibtex } = request.body;
+      const inputs = [arxivId, eprintId, dblpKey, bibtex].filter((v) => v !== undefined);
+      if (inputs.length !== 1) {
+        return sendError(
+          reply,
+          400,
+          'BAD_INPUT',
+          'Provide exactly one of "arxivId", "eprintId", "dblpKey", or "bibtex".',
+        );
+      }
+      try {
+        return await resolveCitation({ arxivId, eprintId, dblpKey, bibtex });
+      } catch (err) {
+        if (err instanceof CitationFetchError) {
+          return sendError(reply, err.statusCode, err.code, err.message);
+        }
+        throw err;
       }
     },
   );

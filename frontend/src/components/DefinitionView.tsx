@@ -220,6 +220,19 @@ export default function DefinitionView({ defSlug, formulationRef, macros }: Prop
       {citation && (
         <p className="text-sm text-gray-600">
           Source: {citation}
+          {data.formulation.citation.url && (
+            <>
+              {' · '}
+              <a
+                className="text-blue-700 hover:underline"
+                href={data.formulation.citation.url}
+                target="_blank"
+                rel="noreferrer"
+              >
+                paper
+              </a>
+            </>
+          )}
           {data.formulation.citation.doi && (
             <>
               {' · '}

@@ -146,6 +146,7 @@ model Formulation {
   citeYear    Int?
   citeDoi     String?
   citeEprint  String?
+  citeUrl     String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

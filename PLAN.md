@@ -301,18 +301,26 @@ Markdown-as-definition-body (see body format above).
       14+10 backend tests (`test/import.test.ts`, `test/layered-macros.test.ts`);
       Playwright-driven end to end (paste and arXiv flows, incl. the real
       2402.09370, and the rename→publish→restyle-vs-sealed loop).
-- [ ] **Citation auto-import + link to the paper** *(user, 2026-07-09)*: imports
-      should arrive citing their source. arXiv exposes BibTeX at
-      `arxiv.org/bibtex/<id>` and ePrint shows a BibTeX block on every paper
-      page — when a scan comes from an `arxivId` (and later, when the PDF stage
-      takes ePrint links), fetch + parse it and prefill the formulation's
-      citation fields (`citePaper`, `citeAuthors`, `citeVenue`, `citeYear`,
-      `citeDoi`, `citeEprint`) in the select step. For pasted-source imports
-      (no id), accept a pasted BibTeX entry or a DBLP key
-      (`dblp.org/rec/<key>.bib`) as the citation source. Definition pages
-      should also **link out to the paper itself** — derivable from
-      `citeEprint` / arXiv id / DOI today; anything else needs a `citeUrl`
-      column (migration).
+- [x] **Citation auto-import + link to the paper** *(user, 2026-07-09; BUILT
+      2026-07-10)*: imports now arrive citing their source. New
+      `POST /import/citation` (editor-gated) resolves an `arxivId`
+      (`arxiv.org/bibtex/<id>`), `eprintId` (the BibTeX block scraped from the
+      ePrint paper page — bot-blocked server-side like the PDF path, so pasted
+      BibTeX is the reliable ePrint route), `dblpKey` (`dblp.org/rec/<key>.bib`,
+      URL/`.bib`/`.html` all normalized), or a pasted `bibtex` string into the
+      flat citation fields. The parser is a pure, dependency-free
+      `shared/src/bibtex.ts` (`parseBibtex` — first non-@comment entry,
+      brace/quote/bare values; accent + Greek/symbol de-LaTeXing for readable
+      author names and `$\Sigma$`-style titles; `Last, First`→`First Last`;
+      arXiv ids become an `arxiv.org/abs` URL and never the IACR `eprint`
+      field; IACR ids recovered from howpublished/note/url), unit-tested in
+      `shared/test/bibtex.test.ts`. Added a **`citeUrl`** column (migration
+      `20260710000000_citation_url`) for the canonical paper link — the
+      `/import` select step auto-prefills on arXiv/ePrint scans and offers a
+      paste-BibTeX / DBLP-key "Look up" box for pasted-source imports; the
+      definition page links out via `citeUrl` (plus the existing doi/eprint
+      links). Backend `test/citation.test.ts` (stubbed-fetch lib + route +
+      citeUrl round-trip); editor CitationForm gained the URL field.
 - [ ] **Test corpus** of real papers (below): `.tex`-source papers for the
       deterministic importer, ePrint-only PDFs for the PDF/LLM stage, and one
       dual-hosted paper (ePrint PDF + arXiv source) whose source is ground truth for

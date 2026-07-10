@@ -12,8 +12,11 @@ harness, the scan-then-select importer surface (`POST /import/scan` +
 reconstruction → validated through `extractFromLatex`; needs
 `ANTHROPIC_API_KEY`) are built AND validated on the real corpus (2026-07-10:
 guided+haiku-4-5 passed the ground-truth bar at ~$0.08–0.12/paper and is now
-the default — PLAN.md "PDF-stage validation" has the results); remaining:
-opt-in PDF harness in `import-tests/`, citation auto-import,
+the default — PLAN.md "PDF-stage validation" has the results). Citation
+auto-import is also built (2026-07-10): `POST /import/citation` +
+`shared/src/bibtex.ts` parser + a `citeUrl` column — arXiv/ePrint/DBLP/pasted
+BibTeX → prefilled citation fields, with a paper link-out on the definition
+page. Remaining: opt-in PDF harness in `import-tests/`,
 human-in-the-loop refinement UX. Production rendering +
 deploy polish moved to Phase 4 (blocked on university VM / OAuth creds / Docker
 anyway). Google/GitHub OAuth app credentials are NOT yet created — dev uses the
@@ -32,7 +35,10 @@ password fallback below.
   (buildApp, used by tests), routes in `src/routes/` (permalinks / definitions /
   macro-sets / auth / invitations / me / import / macro-names — `POST
   /import/scan` is the importer's scan step: `files` map, `arxivId`, `eprintId`,
-  or `pdfBase64` in, extraction out, creates nothing; arXiv fetch + gunzip +
+  or `pdfBase64` in, extraction out, creates nothing; `POST /import/citation`
+  resolves an `arxivId`/`eprintId`/`dblpKey`/pasted `bibtex` into citation
+  fields (`src/lib/citation.ts` fetches + defers to the pure
+  `shared/src/bibtex.ts` `parseBibtex`); arXiv fetch + gunzip +
   minimal ustar reader in `src/lib/arxiv.ts`; PDF/LLM stage in `src/lib/`:
   `eprint.ts` (PDF fetch), `pdf-scout.ts` (pdfjs text-layer heading finder,
   zero tokens), `pdf-extract.ts` (Claude reconstruction, JSON-schema-forced,

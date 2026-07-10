@@ -40,5 +40,7 @@ export type MacroName = Static<typeof S.MacroName>;
 export type CreateMacroNameBody = Static<typeof S.CreateMacroNameBody>;
 export type ImportScanBody = Static<typeof S.ImportScanBody>;
 export type ImportScanResult = Static<typeof S.ImportScanResult>;
+export type CitationLookupBody = Static<typeof S.CitationLookupBody>;
+export type CitationLookupResult = Static<typeof S.CitationLookupResult>;
 export type ListDefinitionsQuery = Static<typeof S.ListDefinitionsQuery>;
 export type PermalinkQuery = Static<typeof S.PermalinkQuery>;

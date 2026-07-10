@@ -6,6 +6,8 @@ import type {
   CreateInvitationBody,
   CreateMacroSetBody,
   CreateRevisionBody,
+  CitationLookupBody,
+  CitationLookupResult,
   DefinitionEditor,
   DefinitionListItem,
   DefinitionPage,
@@ -128,6 +130,10 @@ export const createMacroName = (body: CreateMacroNameBody) =>
 /** Step 1 of scan-then-select: extraction only, creates nothing. */
 export const importScan = (body: ImportScanBody) =>
   api<ImportScanResult>('/import/scan', post(body));
+
+/** Resolve an arXiv/ePrint/DBLP id or pasted BibTeX into citation fields. */
+export const lookupCitation = (body: CitationLookupBody) =>
+  api<CitationLookupResult>('/import/citation', post(body));
 
 // -------------------------------------------------------- session-scoped (me)
 

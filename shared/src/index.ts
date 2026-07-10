@@ -6,3 +6,4 @@ export * from './macro-names.js';
 export * from './cryptocode-preprocess.js';
 export * from './latex-render.js';
 export * from './latex-import.js';
+export * from './bibtex.js';

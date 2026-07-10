@@ -62,6 +62,7 @@ export function citationOf(f: Formulation): Citation {
     year: f.citeYear,
     doi: f.citeDoi,
     eprint: f.citeEprint,
+    url: f.citeUrl,
   };
 }
 

@@ -53,6 +53,8 @@ export const Citation = Type.Object({
   year: Type.Union([Type.Integer({ minimum: 1900, maximum: 2200 }), Type.Null()]),
   doi: Type.Union([Type.String({ maxLength: 200 }), Type.Null()]),
   eprint: Type.Union([Type.String({ maxLength: 200 }), Type.Null()]),
+  /** Canonical link to the paper (arXiv abs / ePrint / DOI / publisher). */
+  url: Type.Union([Type.String({ maxLength: 500 }), Type.Null()]),
 });
 
 // ---------------------------------------------------------------------------
@@ -433,6 +435,25 @@ export const ImportScanResult = Type.Object({
       estimatedCostUsd: Type.Number(),
     }),
   ),
+});
+
+/**
+ * Citation auto-import (PLAN.md Phase 3): resolve a source into citation
+ * fields to prefill the select step. Exactly one input — enforced in the
+ * handler. `bibtex` is a pasted entry; `dblpKey` is fetched from dblp.org.
+ */
+export const CitationLookupBody = Type.Object({
+  arxivId: Type.Optional(ArxivId),
+  eprintId: Type.Optional(EprintId),
+  dblpKey: Type.Optional(Type.String({ maxLength: 300 })),
+  bibtex: Type.Optional(Type.String({ maxLength: 20_000 })),
+});
+
+export const CitationLookupResult = Type.Object({
+  citation: CitationInput,
+  /** Human-readable label for where the citation came from. */
+  source: Type.String(),
+  warnings: Type.Array(Type.String()),
 });
 
 export const ListDefinitionsQuery = Type.Object({

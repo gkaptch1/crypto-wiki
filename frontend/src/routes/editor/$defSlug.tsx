@@ -373,6 +373,7 @@ function CitationForm({
   const [year, setYear] = useState(c.year?.toString() ?? '');
   const [doi, setDoi] = useState(c.doi ?? '');
   const [eprint, setEprint] = useState(c.eprint ?? '');
+  const [url, setUrl] = useState(c.url ?? '');
 
   if (!open) {
     return (
@@ -402,6 +403,7 @@ function CitationForm({
       {field('Year', year, setYear, 'w-20')}
       {field('DOI', doi, setDoi, 'w-40')}
       {field('ePrint (e.g. 2004/332)', eprint, setEprint, 'w-32')}
+      {field('Paper URL', url, setUrl, 'w-72')}
       <button
         className="border border-gray-300 rounded px-2.5 py-1 text-sm hover:border-black"
         onClick={() => {
@@ -412,6 +414,7 @@ function CitationForm({
             year: year ? Number(year) : null,
             doi: doi || null,
             eprint: eprint || null,
+            url: url || null,
           });
           setOpen(false);
         }}
