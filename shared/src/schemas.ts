@@ -429,13 +429,65 @@ export const ImportScanResult = Type.Object({
   llm: Type.Optional(
     Type.Object({
       model: Type.String(),
-      mode: Type.Union([Type.Literal('full'), Type.Literal('guided')]),
+      mode: Type.Union([
+        Type.Literal('full'),
+        Type.Literal('guided'),
+        // scout-first: the user hand-picked the blocks; only their pages were sent.
+        Type.Literal('selected'),
+      ]),
       inputTokens: Type.Integer(),
       outputTokens: Type.Integer(),
       estimatedCostUsd: Type.Number(),
     }),
   ),
 });
+
+// --- Scout-first PDF import (PLAN.md "PDF cost strategy" lever #1) -----------
+// A PDF scan is a two-step loop: (1) POST /import/scout runs the free, zero-token
+// text-layer scan and returns candidate headings + pages; the user ticks the
+// blocks they actually want; (2) POST /import/extract ships ONLY those pages to
+// the LLM. Editors rarely want all ~27 candidates, so this is the big token
+// saver — and it doubles as explicit review of exactly what leaves for the API.
+
+/** One PDF/upload source; exactly one of eprintId/pdfBase64, enforced in the handler. */
+export const ImportPdfSource = Type.Object({
+  eprintId: Type.Optional(EprintId),
+  pdfBase64: Type.Optional(Type.String({ maxLength: 28_000_000 })),
+  pdfName: Type.Optional(Type.String({ maxLength: 200 })),
+});
+
+/** A heading the text-layer scout found — no LLM has seen the PDF yet. */
+export const ImportScoutCandidate = Type.Object({
+  /** Heading keyword as printed, e.g. "Definition". */
+  kind: Type.String(),
+  /** Printed number ("3.1"), if any. */
+  number: Type.Union([Type.String(), Type.Null()]),
+  /** Parenthesized heading title, if any. */
+  title: Type.Union([Type.String(), Type.Null()]),
+  /** 1-based PDF page. */
+  page: Type.Integer(),
+  /** Raw text-layer snippet (garbled math — for locating the block, not import). */
+  preview: Type.String(),
+});
+
+export const ImportScoutBody = ImportPdfSource;
+
+export const ImportScoutResult = Type.Object({
+  pageCount: Type.Integer(),
+  candidates: Type.Array(ImportScoutCandidate),
+});
+
+/**
+ * Scout-first extract: same PDF source plus `selection` — indices into the
+ * scout result's `candidates`. The server re-runs the (deterministic) scout,
+ * keeps only the selected headings, and sends just their pages to the LLM.
+ */
+export const ImportExtractBody = Type.Intersect([
+  ImportPdfSource,
+  Type.Object({
+    selection: Type.Array(Type.Integer({ minimum: 0 }), { minItems: 1, maxItems: 200 }),
+  }),
+]);
 
 /**
  * Citation auto-import (PLAN.md Phase 3): resolve a source into citation

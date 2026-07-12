@@ -1,7 +1,12 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import type { CitationInput, CitationLookupBody, ImportScanResult } from '@crypto-wiki/shared';
+import type {
+  CitationInput,
+  CitationLookupBody,
+  ImportScanResult,
+  ImportScoutResult,
+} from '@crypto-wiki/shared';
 import {
   createDefinition,
   createFormulation,
@@ -10,6 +15,8 @@ import {
   getDefinitions,
   getMacroNames,
   importScan,
+  importScout,
+  importExtract,
   lookupCitation,
 } from '../api/definitions';
 import { ApiRequestError } from '../api/client';
@@ -19,7 +26,10 @@ import LatexView from '../components/LatexView';
 // Paper importer (PLAN.md Phase 3), the scan-then-select flow:
 // 1. submit LaTeX source (arXiv id / uploaded files / paste) → the backend
 //    runs the deterministic extractor and returns candidates — nothing is
-//    created by scanning;
+//    created by scanning. PDFs take the scout-first path (step 1.5): a free,
+//    zero-token text-layer scan lists candidate headings, the user ticks which
+//    ones they want, and ONLY those pages are sent to the LLM — the big token
+//    saver, and explicit review of exactly what leaves for the API;
 // 2. pick candidates, name them, review each one's macro slice (registered
 //    names become the revision's shared symbols, everything else its sealed
 //    local macros; renames rewrite the body, e.g. a paper's \enc that means
@@ -98,6 +108,34 @@ function lookupInputFor(raw: string): CitationLookupBody | null {
   return s.startsWith('@') ? { bibtex: s } : { dblpKey: s };
 }
 
+// Scout-first cost preview. The server sends each selected block's page plus one
+// spillover page (mirrors guidedPages), so estimate from those. Rough per-unit
+// token costs on the Haiku default ($1/$5 per MTok) — the authoritative figure
+// comes back in `scan.llm` after the extract actually runs.
+const PER_PAGE_INPUT_TOK = 2_000;
+const PER_BLOCK_OUTPUT_TOK = 700;
+const HAIKU_PRICE = { in: 1, out: 5 };
+
+/** Pages the extract will ship: each selected candidate's page + one spillover. */
+function selectedPages(sel: Set<number>, scout: ImportScoutResult): number {
+  const pages = new Set<number>();
+  for (const i of sel) {
+    const c = scout.candidates[i];
+    if (!c) continue;
+    pages.add(c.page);
+    if (c.page + 1 <= scout.pageCount) pages.add(c.page + 1);
+  }
+  return pages.size;
+}
+
+function estimateCostUsd(blocks: number, pages: number): number {
+  return (
+    (pages * PER_PAGE_INPUT_TOK * HAIKU_PRICE.in +
+      blocks * PER_BLOCK_OUTPUT_TOK * HAIKU_PRICE.out) /
+    1_000_000
+  );
+}
+
 const inputCls = 'mt-1 w-full border border-gray-300 rounded px-2 py-1.5';
 const monoInputCls = `${inputCls} font-mono`;
 const buttonCls = 'bg-black text-white rounded px-4 py-2 text-sm disabled:opacity-50';
@@ -118,8 +156,13 @@ function ImportPage() {
   const [uploaded, setUploaded] = useState<Record<string, string>>({});
   const [eprintInput, setEprintInput] = useState('');
   const [pdfFile, setPdfFile] = useState<{ name: string; base64: string } | null>(null);
-  const [pdfMode, setPdfMode] = useState<'full' | 'guided'>('guided');
   const [scanError, setScanError] = useState<string | null>(null);
+
+  // ---- step 1.5 (PDF only): scout-first selection — the free text-layer scan
+  //      lists candidate headings; the user ticks which blocks' pages get sent
+  //      to the LLM. Nothing leaves the server until Extract.
+  const [scout, setScout] = useState<ImportScoutResult | null>(null);
+  const [scoutSel, setScoutSel] = useState<Set<number>>(new Set());
 
   // ---- step 2: scan result + selection
   const [scan, setScan] = useState<ImportScanResult | null>(null);
@@ -147,6 +190,28 @@ function ImportPage() {
     onSuccess: (res) => applyCitation(res.citation),
   });
 
+  // Land any scan result (from arXiv/upload/paste, a full-mode PDF, or a
+  // scout-first extract) into the step-2 select UI, resetting per-scan state and
+  // auto-fetching a citation when the source has a known id.
+  const applyScanResult = (result: ImportScanResult, sourceLabel: string, cite?: CitationLookupBody) => {
+    setScan(result);
+    setSource(sourceLabel);
+    setPicks({});
+    setExpanded({});
+    setResults({});
+    setCitation(EMPTY_CITATION);
+    setCiteLookup('');
+    if (cite) citationMut.mutate(cite);
+  };
+
+  /** The PDF source for scout/extract: an uploaded file, or a parsed ePrint id. */
+  const pdfSource = (): { pdfBase64: string; pdfName: string } | { eprintId: string } => {
+    if (pdfFile) return { pdfBase64: pdfFile.base64, pdfName: pdfFile.name };
+    const id = parseEprintId(eprintInput);
+    if (!id) throw new Error('Not a recognizable ePrint id or URL (e.g. 2024/235).');
+    return { eprintId: id };
+  };
+
   const scanMut = useMutation({
     mutationFn: () => {
       if (mode === 'arxiv') {
@@ -155,10 +220,8 @@ function ImportPage() {
         return importScan({ arxivId: id });
       }
       if (mode === 'pdf') {
-        if (pdfFile) return importScan({ pdfBase64: pdfFile.base64, pdfName: pdfFile.name, pdfMode });
-        const id = parseEprintId(eprintInput);
-        if (!id) throw new Error('Not a recognizable ePrint id or URL (e.g. 2024/235).');
-        return importScan({ eprintId: id, pdfMode });
+        // full-mode fallback: send the whole paper to the LLM in one shot
+        return importScan({ ...pdfSource(), pdfMode: 'full' });
       }
       const files = mode === 'paste' ? { 'main.tex': pasted } : uploaded;
       if (Object.keys(files).length === 0 || (mode === 'paste' && !pasted.trim())) {
@@ -169,25 +232,48 @@ function ImportPage() {
     onSuccess: (result) => {
       const arxId = mode === 'arxiv' ? parseArxivId(arxivInput) : null;
       const epId = mode === 'pdf' && !pdfFile ? parseEprintId(eprintInput) : null;
-      setScan(result);
-      setSource(
+      applyScanResult(
+        result,
         arxId
           ? `arXiv:${arxId}`
           : epId
             ? `ePrint ${epId}`
             : mode === 'pdf'
-              ? `${pdfFile?.name ?? 'uploaded PDF'} (LLM extraction)`
+              ? `${pdfFile?.name ?? 'uploaded PDF'} (LLM, full paper)`
               : 'uploaded source',
+        arxId ? { arxivId: arxId } : epId ? { eprintId: epId } : undefined,
       );
-      setPicks({});
-      setExpanded({});
-      setResults({});
-      setCitation(EMPTY_CITATION);
-      setCiteLookup('');
-      // Auto-fetch the citation for a known id; pasted/uploaded imports use the
-      // "Look up citation" box below instead.
-      if (arxId) citationMut.mutate({ arxivId: arxId });
-      else if (epId) citationMut.mutate({ eprintId: epId });
+    },
+    onError: (err) => setScanError(err.message),
+  });
+
+  // Scout-first, step 1: the free text-layer scan. No tokens, nothing sent to the LLM.
+  const scoutMut = useMutation({
+    mutationFn: () => importScout(pdfSource()),
+    onSuccess: (result) => {
+      setScout(result);
+      setScoutSel(new Set(result.candidates.map((_, i) => i))); // default: all ticked
+      setScan(null);
+    },
+    onError: (err) => setScanError(err.message),
+  });
+
+  // Scout-first, step 2: LLM extract over only the selected blocks' pages.
+  const extractMut = useMutation({
+    mutationFn: () => {
+      const selection = [...scoutSel].sort((a, b) => a - b);
+      if (selection.length === 0) throw new Error('Tick at least one block to extract.');
+      return importExtract({ ...pdfSource(), selection });
+    },
+    onSuccess: (result) => {
+      const epId = !pdfFile ? parseEprintId(eprintInput) : null;
+      applyScanResult(
+        result,
+        `${pdfFile ? pdfFile.name : `ePrint ${epId}`} (LLM, ${scoutSel.size} selected block${
+          scoutSel.size === 1 ? '' : 's'
+        })`,
+        epId ? { eprintId: epId } : undefined,
+      );
     },
     onError: (err) => setScanError(err.message),
   });
@@ -409,22 +495,11 @@ function ImportPage() {
                 </span>
               )}
             </div>
-            <label className="flex items-start gap-2">
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={pdfMode === 'guided'}
-                onChange={(e) => setPdfMode(e.target.checked ? 'guided' : 'full')}
-              />
-              <span>
-                Guided mode: send only the pages where a text scan finds candidate headings —
-                much cheaper on long papers, but misses blocks the text layer can't see.
-              </span>
-            </label>
             <p className="text-gray-500">
-              PDF extraction reconstructs LaTeX with an LLM (the PDF is sent to the Anthropic
-              API); a scan takes a few minutes and costs tokens. Everything still lands as
-              drafts for review.
+              <strong>Scout first</strong> (free): a local text scan lists the paper's
+              definition-like headings so you can tick exactly the blocks you want — then only
+              those pages go to the LLM (the Anthropic API) for LaTeX reconstruction. This keeps
+              a long paper down to a few cents. Everything still lands as drafts for review.
             </p>
           </div>
         )}
@@ -463,22 +538,65 @@ function ImportPage() {
         )}
 
         {scanError && <p className="text-sm text-red-600">{scanError}</p>}
-        <button
-          type="button"
-          className={buttonCls}
-          disabled={scanMut.isPending}
-          onClick={() => {
-            setScanError(null);
-            scanMut.mutate();
-          }}
-        >
-          {scanMut.isPending
-            ? mode === 'pdf'
-              ? 'Scanning with LLM (can take minutes)…'
-              : 'Scanning…'
-            : 'Scan'}
-        </button>
+        {mode === 'pdf' ? (
+          <div className="space-y-1.5">
+            <button
+              type="button"
+              className={buttonCls}
+              disabled={scoutMut.isPending}
+              onClick={() => {
+                setScanError(null);
+                scoutMut.mutate();
+              }}
+            >
+              {scoutMut.isPending ? 'Scouting…' : 'Scout (free)'}
+            </button>
+            <p className="text-xs text-gray-500">
+              Or{' '}
+              <button
+                type="button"
+                className="underline disabled:opacity-50"
+                disabled={scanMut.isPending}
+                onClick={() => {
+                  setScanError(null);
+                  scanMut.mutate();
+                }}
+              >
+                scan the whole paper in one shot
+              </button>{' '}
+              (full mode — sends every page to the LLM; costs more tokens, but catches blocks the
+              text scan can't see).
+              {scanMut.isPending && ' Scanning the full paper with the LLM (can take minutes)…'}
+            </p>
+          </div>
+        ) : (
+          <button
+            type="button"
+            className={buttonCls}
+            disabled={scanMut.isPending}
+            onClick={() => {
+              setScanError(null);
+              scanMut.mutate();
+            }}
+          >
+            {scanMut.isPending ? 'Scanning…' : 'Scan'}
+          </button>
+        )}
       </section>
+
+      {/* --------------------------------- step 1.5 (PDF): scout-first selection */}
+      {scout && (
+        <ScoutSelect
+          scout={scout}
+          selection={scoutSel}
+          setSelection={setScoutSel}
+          onExtract={() => {
+            setScanError(null);
+            extractMut.mutate();
+          }}
+          extracting={extractMut.isPending}
+        />
+      )}
 
       {/* ------------------------------------------- step 2: select & import */}
       {scan && (
@@ -831,5 +949,110 @@ function ImportPage() {
         </section>
       )}
     </div>
+  );
+}
+
+// Scout-first selection (step 1.5, PDF only): tick the blocks whose pages get
+// sent to the LLM. The scout math is garbled (text layer), so this is only for
+// locating/choosing — faithful reconstruction is the LLM's job on Extract.
+function ScoutSelect({
+  scout,
+  selection,
+  setSelection,
+  onExtract,
+  extracting,
+}: {
+  scout: ImportScoutResult;
+  selection: Set<number>;
+  setSelection: (next: Set<number>) => void;
+  onExtract: () => void;
+  extracting: boolean;
+}) {
+  const toggle = (i: number) => {
+    const next = new Set(selection);
+    if (next.has(i)) next.delete(i);
+    else next.add(i);
+    setSelection(next);
+  };
+  const allSelected = selection.size === scout.candidates.length && scout.candidates.length > 0;
+  const pages = selectedPages(selection, scout);
+  const estimate = estimateCostUsd(selection.size, pages);
+
+  return (
+    <section className="border border-gray-200 rounded-lg p-4 space-y-3">
+      <div className="flex items-baseline gap-3">
+        <h2 className="font-semibold">Pick the blocks to extract</h2>
+        <span className="text-sm text-gray-500">
+          text scan found {scout.candidates.length} heading
+          {scout.candidates.length === 1 ? '' : 's'} across {scout.pageCount} page
+          {scout.pageCount === 1 ? '' : 's'} — no tokens spent yet
+        </span>
+        <button
+          type="button"
+          className="ml-auto text-sm underline text-gray-600"
+          onClick={() =>
+            setSelection(allSelected ? new Set() : new Set(scout.candidates.map((_, i) => i)))
+          }
+        >
+          {allSelected ? 'clear all' : 'select all'}
+        </button>
+      </div>
+
+      {scout.candidates.length === 0 ? (
+        <p className="text-sm text-gray-600">
+          The text scan found no definition-like headings — the paper may state its definitions
+          in prose, or the PDF may have no text layer. Try “scan the whole paper in one shot”
+          above.
+        </p>
+      ) : (
+        <ul className="space-y-1.5">
+          {scout.candidates.map((c, i) => (
+            <li key={i} className="flex items-start gap-3 text-sm">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={selection.has(i)}
+                onChange={() => toggle(i)}
+              />
+              <div className="min-w-0">
+                <div>
+                  <span className="font-medium">
+                    {c.kind}
+                    {c.number ? ` ${c.number}` : ''}
+                  </span>
+                  {c.title && <span> — {c.title}</span>}
+                  <span className="ml-2 text-xs text-gray-500">page {c.page}</span>
+                </div>
+                {c.preview && (
+                  <p className="text-xs text-gray-500 truncate" title={c.preview}>
+                    {c.preview}
+                  </p>
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="flex items-center gap-3 pt-1">
+        <button
+          type="button"
+          className={buttonCls}
+          disabled={extracting || selection.size === 0}
+          onClick={onExtract}
+        >
+          {extracting
+            ? 'Extracting with LLM (can take minutes)…'
+            : `Extract ${selection.size} selected`}
+        </button>
+        {selection.size > 0 && (
+          <span className="text-xs text-gray-500">
+            ships {pages} page{pages === 1 ? '' : 's'} to the LLM ≈{' '}
+            <strong>${estimate < 0.01 ? estimate.toFixed(3) : estimate.toFixed(2)}</strong> on
+            Haiku (rough — exact cost shown after)
+          </span>
+        )}
+      </div>
+    </section>
   );
 }

@@ -454,14 +454,24 @@ Markdown-as-definition-body (see body format above).
 - [ ] **PDF cost strategy — levers beyond model choice** *(user-raised
       2026-07-10: $1–2/paper "wildly expensive" at scale; complementary, in
       rough order of leverage)*:
-      1. **Scout-first user selection** (moderate code; merges into the
-         human-in-the-loop UX item below): split the PDF scan into scout
-         (free, zero tokens — already built) → user ticks the candidates they
-         actually want → LLM extracts ONLY the selected blocks' pages. Editors
-         rarely want all ~27 candidates; 3–5 selections spanning a handful of
-         pages ≈ $0.02–0.06 on Haiku, independent of paper length. Also
-         doubles as explicit user verification of exactly what gets sent to
-         the API. This is the likely production interactive path.
+      1. **Scout-first user selection** — DONE 2026-07-10: the PDF path is now
+         a two-step loop. `POST /import/scout` runs the free zero-token
+         text-layer scan and returns candidate headings + pages; the user ticks
+         the blocks they want; `POST /import/extract` (body: PDF source +
+         `selection` = scout indices) re-runs the deterministic scout, keeps
+         only the selected headings, and ships ONLY their pages (each + one
+         spillover) to the LLM as a new `'selected'` mode. Stateless — the PDF
+         is re-sent on extract; the scout is deterministic so indices are
+         stable. `/import` PDF tab reworked: "Scout (free)" → checklist with a
+         page-count + rough cost preview → "Extract N selected"; full-mode
+         one-shot kept as a fallback for text-layer-less PDFs. Editors rarely
+         want all ~27 candidates; 3–5 selections spanning a handful of pages ≈
+         $0.02–0.06 on Haiku, independent of paper length. Also doubles as
+         explicit user verification of exactly what gets sent to the API — the
+         likely production interactive path. Tests in `pdf-import.test.ts`
+         (selection unit + scout/extract routes). *(Not yet exercised on a real
+         paper end-to-end — the arXiv scout PDF makers in tests are synthetic;
+         real-PDF confirmation is a `verify`-skill task once creds are set.)*
       2. **Cheaper model as default** — DONE 2026-07-10: guided+haiku-4-5
          survived quality scoring at ~$0.08–0.12/paper and is now the code
          default (see "PDF-stage validation" results above).
@@ -489,11 +499,14 @@ Markdown-as-definition-body (see body format above).
       feedback / edits to refine the candidates before accepting them as drafts.
       Mostly UI design; preserves the nothing-auto-publishes invariant. The
       importer surface's scan-then-select step above is the first increment of
-      this loop (built); this item extends it to editing/refining candidate
-      content, not just choosing among candidates. Observed need from driving
-      the real flow: candidate titles are sometimes raw LaTeX
-      (`\Cref{def:skPRC,def:pkPRC}` in 2402.09370's intro) — cleaning those up
-      is exactly the refinement step this item covers.
+      this loop (built), and **scout-first PDF selection** (lever #1 above) is
+      the second (DONE 2026-07-10) — the user now curates *which* PDF blocks get
+      reconstructed before any tokens are spent. **Remaining increment:** editing/
+      refining candidate *content* in the select step, not just choosing among
+      candidates — inline-edit a candidate's title (kill raw LaTeX like
+      `\Cref{def:skPRC,def:pkPRC}` from 2402.09370's intro) and body with a live
+      KaTeX preview before it lands as a draft. Currently you fix those by
+      importing the draft and editing it in the ordinary editor.
 
 #### Candidate import corpus *(2026-07-09, revised with user picks same day)*
 

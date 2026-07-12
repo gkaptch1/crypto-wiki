@@ -244,6 +244,29 @@ describe('llmExtractFromPdf (injected completion)', () => {
     ).rejects.toMatchObject({ statusCode: 422, code: 'NO_CANDIDATE_PAGES' });
   });
 
+  it('selected mode: ships only the picked block(s) pages + a filtered checklist', async () => {
+    const pdf = await makePdf(PAPER_PAGES);
+    const complete = fakeComplete(JSON.stringify(EXTRACTION));
+    // scout finds [0] Definition 3.1 (page 2), [1] Construction 2 (page 4); pick just the latter
+    const result = await llmExtractFromPdf(pdf, { pdfName: 'paper.pdf', selection: [1], complete });
+    expect(result.llm.mode).toBe('selected');
+    const arg = (complete as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    // checklist carries only the selected heading
+    expect(arg.prompt).toContain('Construction 2');
+    expect(arg.prompt).not.toContain('Definition 3.1');
+    // and the payload is just that block's page (4; page 5 clamped away)
+    const sub = await scoutPdf(Buffer.from(arg.pdfBase64, 'base64'));
+    expect(sub.pageCount).toBe(1);
+    expect(sub.candidates.map((c) => c.kind)).toEqual(['Construction']);
+  });
+
+  it('selected mode with an all-out-of-range selection is a 422', async () => {
+    const pdf = await makePdf(PAPER_PAGES);
+    await expect(
+      llmExtractFromPdf(pdf, { pdfName: 'x.pdf', selection: [99], complete: fakeComplete('{}') }),
+    ).rejects.toMatchObject({ statusCode: 422, code: 'NO_CANDIDATE_PAGES' });
+  });
+
   it('unparseable LLM output is a 502', async () => {
     const pdf = await makePdf(PAPER_PAGES);
     await expect(
@@ -375,5 +398,101 @@ describe('POST /import/scan — PDF inputs', () => {
     });
     expect(res.statusCode).toBe(503);
     expect(res.json().code).toBe('LLM_NOT_CONFIGURED');
+  });
+});
+
+describe('POST /import/scout — free text-layer scan (scout-first, step 1)', () => {
+  it('rejects combined or empty inputs', async () => {
+    for (const payload of [{}, { eprintId: '2024/235', pdfBase64: 'JVBERg==' }]) {
+      const res = await inject({ method: 'POST', url: '/import/scout', payload });
+      expect(res.statusCode).toBe(400);
+    }
+  });
+
+  it('scans an uploaded pdf and returns headings + pages, with no LLM call', async () => {
+    vi.mocked(llmExtractFromPdf).mockClear();
+    const pdf = await makePdf(PAPER_PAGES);
+    const res = await inject({
+      method: 'POST',
+      url: '/import/scout',
+      payload: { pdfBase64: pdf.toString('base64'), pdfName: 'p.pdf' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.pageCount).toBe(4);
+    expect(body.candidates).toHaveLength(2);
+    expect(body.candidates[0]).toMatchObject({ kind: 'Definition', number: '3.1', page: 2 });
+    expect(vi.mocked(llmExtractFromPdf)).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-pdf upload', async () => {
+    const res = await inject({
+      method: 'POST',
+      url: '/import/scout',
+      payload: { pdfBase64: Buffer.from('hello').toString('base64') },
+    });
+    expect(res.statusCode).toBe(422);
+    expect(res.json().code).toBe('BAD_PDF');
+  });
+});
+
+describe('POST /import/extract — selected-pages LLM extract (scout-first, step 2)', () => {
+  const CANNED_SELECTED = {
+    ...extractionToScanResult(EXTRACTION, 'p.pdf', SCOUT),
+    llm: {
+      model: 'claude-haiku-4-5',
+      mode: 'selected' as const,
+      inputTokens: 4000,
+      outputTokens: 1400,
+      estimatedCostUsd: 0.011,
+    },
+  };
+
+  it('requires a non-empty selection (schema)', async () => {
+    const pdf = await makePdf(PAPER_PAGES);
+    const res = await inject({
+      method: 'POST',
+      url: '/import/extract',
+      payload: { pdfBase64: pdf.toString('base64'), selection: [] },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('rejects combined inputs', async () => {
+    const res = await inject({
+      method: 'POST',
+      url: '/import/extract',
+      payload: { eprintId: '2024/235', pdfBase64: 'JVBERg==', selection: [0] },
+    });
+    expect(res.statusCode).toBe(400);
+  });
+
+  it('passes the selection through to the extractor and serializes selected-mode usage', async () => {
+    vi.mocked(llmExtractFromPdf).mockResolvedValueOnce(CANNED_SELECTED);
+    const pdf = await makePdf(PAPER_PAGES);
+    const res = await inject({
+      method: 'POST',
+      url: '/import/extract',
+      payload: { pdfBase64: pdf.toString('base64'), pdfName: 'p.pdf', selection: [1] },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().llm).toMatchObject({ mode: 'selected', model: 'claude-haiku-4-5' });
+    expect(vi.mocked(llmExtractFromPdf).mock.lastCall?.[1]).toMatchObject({
+      pdfName: 'p.pdf',
+      selection: [1],
+    });
+  });
+
+  it('surfaces the ePrint 403 bot-block with its status/code', async () => {
+    vi.mocked(fetchEprintPdf).mockRejectedValueOnce(
+      new EprintFetchError(502, 'EPRINT_BLOCKED', 'ePrint blocked the server-side fetch.'),
+    );
+    const res = await inject({
+      method: 'POST',
+      url: '/import/extract',
+      payload: { eprintId: '2021/422', selection: [0] },
+    });
+    expect(res.statusCode).toBe(502);
+    expect(res.json().code).toBe('EPRINT_BLOCKED');
   });
 });

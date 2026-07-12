@@ -35,7 +35,10 @@ export class PdfImportError extends Error {
   }
 }
 
-export type PdfScanMode = 'full' | 'guided';
+// 'full' ships the whole PDF; 'guided' ships every scouted candidate's pages;
+// 'selected' ships only the pages of the candidates the user hand-picked
+// (scout-first) — the cheapest interactive path.
+export type PdfScanMode = 'full' | 'guided' | 'selected';
 
 export interface LlmUsage {
   model: string;
@@ -181,11 +184,11 @@ function buildPrompt(scout: ScoutCandidate[], mode: PdfScanMode): string {
       "game/oracle pseudocode with the cryptocode package's \\procedure{header}{...} syntax " +
       '(rows separated by \\\\, \\pcreturn, \\sample, \\pcfor, ...) when it appears inside a block. ' +
       'Do not include the "Definition N." heading itself in the body.',
-    mode === 'guided'
-      ? '- page: this PDF contains only selected pages of the paper; set page to the page ' +
+    mode === 'full'
+      ? '- page: the 1-based page of this PDF where the block starts'
+      : '- page: this PDF contains only selected pages of the paper; set page to the page ' +
         'number printed on the sheet if visible, else null (the checklist page + scoutIndex ' +
-        'will be used instead).'
-      : '- page: the 1-based page of this PDF where the block starts',
+        'will be used instead).',
     '- scoutIndex: the matching checklist index below, else null',
     '',
     'Notation macros:',
@@ -444,6 +447,14 @@ export interface PdfExtractOptions {
   pdfName: string;
   mode?: PdfScanMode;
   model?: string;
+  /**
+   * Scout-first path: indices into scoutPdf's candidate list (as returned by a
+   * prior /import/scout). Only these headings' pages are sent to the LLM, and
+   * only they become the checklist. Implies 'selected' mode — takes precedence
+   * over `mode`. The scout is re-run here (it is deterministic), so no PDF state
+   * is held between the scout and extract calls.
+   */
+  selection?: number[];
   /** Test seam; defaults to the real Anthropic call. */
   complete?: LlmComplete;
 }
@@ -452,7 +463,6 @@ export async function llmExtractFromPdf(
   pdf: Buffer,
   opts: PdfExtractOptions,
 ): Promise<PdfScanResult> {
-  const mode: PdfScanMode = opts.mode ?? 'full';
   const model = opts.model ?? DEFAULT_MODEL;
   const complete = opts.complete ?? anthropicComplete;
 
@@ -463,28 +473,49 @@ export async function llmExtractFromPdf(
     throw new PdfImportError(422, 'BAD_PDF', 'Could not read that PDF.');
   }
 
+  // The candidate set the LLM is asked about (and whose pages are sent). The
+  // checklist is indexed over THIS list, so scoutIndex flows through consistently.
+  let candidates = scout.candidates;
+  let mode: PdfScanMode;
   let payload = pdf;
-  if (mode === 'guided') {
-    if (scout.candidates.length === 0) {
+
+  if (opts.selection) {
+    mode = 'selected';
+    candidates = opts.selection
+      .map((i) => scout.candidates[i])
+      .filter((c): c is ScoutCandidate => c !== undefined);
+    if (candidates.length === 0) {
       throw new PdfImportError(
         422,
         'NO_CANDIDATE_PAGES',
-        'The text scan found no definition-like headings to guide a page subset — use full mode.',
+        'None of the selected blocks were found in the scan — re-scout the PDF and pick again.',
       );
     }
-    payload = await buildSubPdf(pdf, guidedPages(scout.candidates, scout.pageCount));
+    payload = await buildSubPdf(pdf, guidedPages(candidates, scout.pageCount));
+  } else {
+    mode = opts.mode ?? 'full';
+    if (mode === 'guided') {
+      if (scout.candidates.length === 0) {
+        throw new PdfImportError(
+          422,
+          'NO_CANDIDATE_PAGES',
+          'The text scan found no definition-like headings to guide a page subset — use full mode.',
+        );
+      }
+      payload = await buildSubPdf(pdf, guidedPages(scout.candidates, scout.pageCount));
+    }
   }
 
   const { json, inputTokens, outputTokens } = await complete({
     pdfBase64: payload.toString('base64'),
     system: SYSTEM_PROMPT,
-    prompt: buildPrompt(scout.candidates, mode),
+    prompt: buildPrompt(candidates, mode),
     schema: EXTRACTION_SCHEMA,
     model,
   });
 
   const extraction = parseExtraction(json);
-  const result = extractionToScanResult(extraction, opts.pdfName, scout.candidates);
+  const result = extractionToScanResult(extraction, opts.pdfName, candidates);
   const price = PRICES[model] ?? PRICES['claude-opus-4-8'];
   return {
     ...result,

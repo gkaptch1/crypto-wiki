@@ -8,16 +8,22 @@ regression harness; accounts & invited write via better-auth). Phases re-ordered
 2026-07-09: **Phase 3 is now paper import** (deterministic LaTeX extractor →
 macro set + draft formulations; test corpus in PLAN.md). Extractor, corpus
 harness, the scan-then-select importer surface (`POST /import/scan` +
-`/import` page), and the PDF/LLM stage (deterministic pdfjs scout → Claude
+`/import` page), the PDF/LLM stage (deterministic pdfjs scout → Claude
 reconstruction → validated through `extractFromLatex`; needs
-`ANTHROPIC_API_KEY`) are built AND validated on the real corpus (2026-07-10:
+`ANTHROPIC_API_KEY`), and **scout-first PDF selection** (2026-07-10: `POST
+/import/scout` free zero-token scan → user ticks blocks → `POST /import/extract`
+with a `selection` sends only those pages to the LLM as a new `'selected'` mode —
+the big token lever, ~$0.02–0.06/paper) are built AND validated on the real corpus (2026-07-10:
 guided+haiku-4-5 passed the ground-truth bar at ~$0.08–0.12/paper and is now
 the default — PLAN.md "PDF-stage validation" has the results). Citation
 auto-import is also built (2026-07-10): `POST /import/citation` +
 `shared/src/bibtex.ts` parser + a `citeUrl` column — arXiv/ePrint/DBLP/pasted
 BibTeX → prefilled citation fields, with a paper link-out on the definition
-page. Remaining: opt-in PDF harness in `import-tests/`,
-human-in-the-loop refinement UX. Production rendering +
+page. Remaining: opt-in PDF harness in `import-tests/`, and the last
+human-in-the-loop increment — inline candidate title/body editing (with live
+KaTeX preview) in the select step, so raw-LaTeX titles get cleaned before a
+draft lands rather than after (scan-then-select + scout-first selection are
+built). Production rendering +
 deploy polish moved to Phase 4 (blocked on university VM / OAuth creds / Docker
 anyway). Google/GitHub OAuth app credentials are NOT yet created — dev uses the
 password fallback below.
@@ -35,14 +41,19 @@ password fallback below.
   (buildApp, used by tests), routes in `src/routes/` (permalinks / definitions /
   macro-sets / auth / invitations / me / import / macro-names — `POST
   /import/scan` is the importer's scan step: `files` map, `arxivId`, `eprintId`,
-  or `pdfBase64` in, extraction out, creates nothing; `POST /import/citation`
+  or `pdfBase64` in, extraction out, creates nothing; the scout-first PDF pair
+  `POST /import/scout` (PDF source → free zero-token heading list) + `POST
+  /import/extract` (PDF source + `selection` scout-index array → LLM extract over
+  only those pages, `'selected'` mode) — all three share `acquirePdf` in
+  `routes/import.ts`; `POST /import/citation`
   resolves an `arxivId`/`eprintId`/`dblpKey`/pasted `bibtex` into citation
   fields (`src/lib/citation.ts` fetches + defers to the pure
   `shared/src/bibtex.ts` `parseBibtex`); arXiv fetch + gunzip +
   minimal ustar reader in `src/lib/arxiv.ts`; PDF/LLM stage in `src/lib/`:
   `eprint.ts` (PDF fetch), `pdf-scout.ts` (pdfjs text-layer heading finder,
   zero tokens), `pdf-extract.ts` (Claude reconstruction, JSON-schema-forced,
-  `full`/`guided` modes, output validated by running it back through
+  `full`/`guided`/`selected` modes — `selected` takes a scout-index `selection`
+  and ships only those blocks' pages; output validated by running it back through
   `extractFromLatex`; injectable `complete` seam for tests);
   `/macro-names` is the macro-name registry),
   better-auth config + role-assignment hook
@@ -50,7 +61,9 @@ password fallback below.
   schema in `prisma/schema.prisma`, seed in `prisma/seed.ts`, tests in `test/`.
 - `frontend/` — React + Vite + TanStack Router (file-based routes in `src/routes/`)
   + React Query + Tailwind. KaTeX rendering. `/import` (editor-gated) is the
-  scan-then-select import page; its select step calls the ordinary editor CRUD
+  scan-then-select import page; PDFs take a scout-first sub-step (Scout free →
+  `ScoutSelect` checklist with page-count + cost preview → Extract selected),
+  and its select step calls the ordinary editor CRUD
   (macro set → definition → formulation → draft revision), no import-specific
   write endpoint exists.
 - `spike/` — Phase 0 rendering spike (real LaTeX + cryptocode → SVG). Verdict: passed.

@@ -14,6 +14,9 @@ import type {
   ForkMacroSetBody,
   ImportScanBody,
   ImportScanResult,
+  ImportScoutBody,
+  ImportScoutResult,
+  ImportExtractBody,
   Invitation,
   CreateMacroNameBody,
   MacroName,
@@ -130,6 +133,14 @@ export const createMacroName = (body: CreateMacroNameBody) =>
 /** Step 1 of scan-then-select: extraction only, creates nothing. */
 export const importScan = (body: ImportScanBody) =>
   api<ImportScanResult>('/import/scan', post(body));
+
+/** Scout-first PDF, step 1: the free, zero-token text-layer scan. */
+export const importScout = (body: ImportScoutBody) =>
+  api<ImportScoutResult>('/import/scout', post(body));
+
+/** Scout-first PDF, step 2: LLM extract over only the selected blocks' pages. */
+export const importExtract = (body: ImportExtractBody) =>
+  api<ImportScanResult>('/import/extract', post(body));
 
 /** Resolve an arXiv/ePrint/DBLP id or pasted BibTeX into citation fields. */
 export const lookupCitation = (body: CitationLookupBody) =>
