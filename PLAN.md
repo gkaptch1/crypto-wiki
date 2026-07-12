@@ -493,20 +493,23 @@ Markdown-as-definition-body (see body format above).
          free deterministic path forever — the PDF/LLM stage only pays for
          the ePrint-only subset, so the effective per-corpus cost is lower
          than per-paper × corpus size.
-- [ ] **Human-in-the-loop import UX** *(build after the extraction pipeline works)*:
+- [x] **Human-in-the-loop import UX** — DONE (three increments, last 2026-07-11):
       importing is a review loop, not a batch job — pull in a link/PDF/`.tex`, the
-      pipeline proposes candidate definitions + a macro set, and the user gives
-      feedback / edits to refine the candidates before accepting them as drafts.
-      Mostly UI design; preserves the nothing-auto-publishes invariant. The
-      importer surface's scan-then-select step above is the first increment of
-      this loop (built), and **scout-first PDF selection** (lever #1 above) is
-      the second (DONE 2026-07-10) — the user now curates *which* PDF blocks get
-      reconstructed before any tokens are spent. **Remaining increment:** editing/
-      refining candidate *content* in the select step, not just choosing among
-      candidates — inline-edit a candidate's title (kill raw LaTeX like
-      `\Cref{def:skPRC,def:pkPRC}` from 2402.09370's intro) and body with a live
-      KaTeX preview before it lands as a draft. Currently you fix those by
-      importing the draft and editing it in the ordinary editor.
+      pipeline proposes candidate definitions + a macro set, and the user curates/
+      edits before accepting them as drafts. Preserves the nothing-auto-publishes
+      invariant; mostly UI. The increments: (1) **scan-then-select** — choose
+      *which* candidates (2026-07-09); (2) **scout-first PDF selection** (lever #1
+      above) — curate *which* PDF blocks get reconstructed before any tokens are
+      spent (2026-07-10); (3) **inline candidate content editing** (2026-07-11) —
+      in the select step each picked candidate's title (plain text — kill raw
+      LaTeX like `\Cref{def:skPRC,def:pkPRC}` from 2402.09370's intro) and **body**
+      are editable, the body in a two-pane editor with a **live KaTeX preview**
+      (a try/catch `LivePreview` so a half-typed body shows a note, never
+      white-screens); the edited body is exactly what lands as the draft revision,
+      and its provenance commentary records "body edited before import". Verified
+      live on the free arXiv path (2402.09370 → 30 candidates; edit + import +
+      persisted-body/commentary checks all green). In
+      `frontend/src/routes/import.tsx`.
 
 #### Candidate import corpus *(2026-07-09, revised with user picks same day)*
 

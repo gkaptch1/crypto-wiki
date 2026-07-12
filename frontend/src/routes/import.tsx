@@ -6,6 +6,7 @@ import type {
   CitationLookupBody,
   ImportScanResult,
   ImportScoutResult,
+  MacroMap,
 } from '@crypto-wiki/shared';
 import {
   createDefinition,
@@ -22,6 +23,7 @@ import {
 import { ApiRequestError } from '../api/client';
 import RequireEditor from '../components/RequireEditor';
 import LatexView from '../components/LatexView';
+import { renderLatexBody } from '../lib/latex';
 
 // Paper importer (PLAN.md Phase 3), the scan-then-select flow:
 // 1. submit LaTeX source (arXiv id / uploaded files / paste) → the backend
@@ -50,6 +52,8 @@ interface Pick {
   defSlug: string;
   title: string;
   fSlug: string;
+  /** The revision body — extracted LaTeX, editable before it lands as a draft. */
+  body: string;
   /** original macro name → name to import as (identity entries omitted). */
   renames: Record<string, string>;
 }
@@ -305,6 +309,7 @@ function ImportPage() {
           defSlug: slugify(base, `${candidate.envName}-${index + 1}`),
           title,
           fSlug: 'imported',
+          body: candidate.body,
           renames: {},
         },
       };
@@ -313,6 +318,12 @@ function ImportPage() {
 
   const setPick = (index: number, patch: Partial<Pick>) =>
     setPicks((prev) => ({ ...prev, [index]: { ...prev[index], ...patch } }));
+
+  /** The macros a candidate's body actually uses, for rendering a preview. */
+  const previewMacros = (candidate: Candidate): MacroMap =>
+    Object.fromEntries(
+      candidate.usedMacros.filter((n) => n in scan!.macroMap).map((n) => [n, scan!.macroMap[n]]),
+    );
 
   /** The candidate's definable macro slice, with renames applied and classified. */
   function candidateMacroPlan(candidate: Candidate, pick: Pick) {
@@ -351,7 +362,8 @@ function ImportPage() {
         if (results[index]?.ok) continue; // already imported in a previous run
         try {
           const { rows } = candidateMacroPlan(candidate, pick);
-          let body = candidate.body;
+          const edited = pick.body !== candidate.body;
+          let body = pick.body;
           const macros: Record<string, string> = {};
           const localMacros: Record<string, string> = {};
           for (const row of rows) {
@@ -373,7 +385,7 @@ function ImportPage() {
             bodyLatex: body,
             commentaryMd: `*Imported from ${source} (\`${
               scan!.llm ? `${candidate.file} p.${candidate.line}` : `${candidate.file}:${candidate.line}`
-            }\`).*`,
+            }\`${edited ? '; body edited before import' : ''}).*`,
             macros,
             localMacros,
           });
@@ -680,11 +692,7 @@ function ImportPage() {
                     <div className="border-t border-gray-100 px-4 py-3 grid gap-4 md:grid-cols-2">
                       <LatexView
                         body={candidate.body}
-                        macros={Object.fromEntries(
-                          candidate.usedMacros
-                            .filter((n) => n in scan.macroMap)
-                            .map((n) => [n, scan.macroMap[n]]),
-                        )}
+                        macros={previewMacros(candidate)}
                         className="min-w-0 overflow-x-auto"
                       />
                       <pre className="min-w-0 overflow-x-auto text-xs bg-gray-50 rounded p-2 whitespace-pre-wrap">
@@ -726,6 +734,38 @@ function ImportPage() {
                             onChange={(e) => setPick(index, { fSlug: e.target.value })}
                           />
                         </label>
+                      </div>
+
+                      <div>
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-xs font-semibold text-gray-600">
+                            Body (LaTeX) — clean it up here (kill stray <code>\Cref</code>s, fix
+                            reconstruction slips); the preview renders live, and this is exactly
+                            what lands as the draft revision.
+                          </span>
+                          {pick.body !== candidate.body && (
+                            <button
+                              type="button"
+                              className="shrink-0 text-xs underline text-gray-500"
+                              onClick={() => setPick(index, { body: candidate.body })}
+                            >
+                              reset to extracted
+                            </button>
+                          )}
+                        </div>
+                        <div className="mt-1 grid gap-3 md:grid-cols-2">
+                          <textarea
+                            className={`${monoInputCls} h-56 text-xs`}
+                            value={pick.body}
+                            spellCheck={false}
+                            onChange={(e) => setPick(index, { body: e.target.value })}
+                          />
+                          <LivePreview
+                            body={pick.body}
+                            macros={previewMacros(candidate)}
+                            className="min-w-0 overflow-x-auto border border-gray-200 rounded bg-white p-2"
+                          />
+                        </div>
                       </div>
 
                       {plan && plan.rows.length > 0 && (
@@ -928,7 +968,10 @@ function ImportPage() {
                   importMut.isPending ||
                   importable.length === 0 ||
                   hasInvalidRename ||
-                  importable.some(({ pick }) => !pick.title.trim() || !pick.defSlug || !pick.fSlug)
+                  importable.some(
+                    ({ pick }) =>
+                      !pick.title.trim() || !pick.defSlug || !pick.fSlug || !pick.body.trim(),
+                  )
                 }
                 onClick={() => importMut.mutate()}
               >
@@ -937,6 +980,11 @@ function ImportPage() {
               {importable.some(({ pick }) => !pick.title.trim()) && (
                 <p className="text-xs text-gray-500">
                   Every selected candidate needs a definition title.
+                </p>
+              )}
+              {importable.some(({ pick }) => !pick.body.trim()) && (
+                <p className="text-xs text-gray-500">
+                  Every selected candidate needs a non-empty body.
                 </p>
               )}
               {hasInvalidRename && (
@@ -950,6 +998,37 @@ function ImportPage() {
       )}
     </div>
   );
+}
+
+// Live KaTeX preview for the in-place body editor. Unlike LatexView (used on
+// trusted, already-extracted bodies) this wraps the render in a try/catch: a
+// half-typed body — an unbalanced $, a dangling \begin — must show a gentle
+// note, not throw during render and blank the whole import page.
+function LivePreview({
+  body,
+  macros,
+  className = '',
+}: {
+  body: string;
+  macros: MacroMap;
+  className?: string;
+}) {
+  const rendered = useMemo(() => {
+    try {
+      return { ok: true as const, html: renderLatexBody(body, macros) };
+    } catch {
+      return { ok: false as const, html: '' };
+    }
+  }, [body, macros]);
+  if (!body.trim())
+    return <p className={`text-xs text-gray-400 ${className}`}>Body is empty.</p>;
+  if (!rendered.ok)
+    return (
+      <p className={`text-xs text-amber-700 ${className}`}>
+        Preview unavailable — check the LaTeX syntax.
+      </p>
+    );
+  return <div className={className} dangerouslySetInnerHTML={{ __html: rendered.html }} />;
 }
 
 // Scout-first selection (step 1.5, PDF only): tick the blocks whose pages get

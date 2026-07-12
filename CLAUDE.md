@@ -19,11 +19,14 @@ the default — PLAN.md "PDF-stage validation" has the results). Citation
 auto-import is also built (2026-07-10): `POST /import/citation` +
 `shared/src/bibtex.ts` parser + a `citeUrl` column — arXiv/ePrint/DBLP/pasted
 BibTeX → prefilled citation fields, with a paper link-out on the definition
-page. Remaining: opt-in PDF harness in `import-tests/`, and the last
-human-in-the-loop increment — inline candidate title/body editing (with live
-KaTeX preview) in the select step, so raw-LaTeX titles get cleaned before a
-draft lands rather than after (scan-then-select + scout-first selection are
-built). Production rendering +
+page. **Inline candidate editing** (2026-07-11): the select step now edits each
+picked candidate's title (plain text) and **body** — a two-pane editor with a
+live KaTeX preview (`LivePreview`, try/catch so a half-typed body never
+white-screens) — before a draft lands; the edited body is exactly what's stored
+and its commentary notes "body edited before import". Verified live on the free
+arXiv path. This completes the human-in-the-loop increments (scan-then-select +
+scout-first selection + inline editing). Remaining in Phase 3: opt-in PDF
+harness in `import-tests/`. Production rendering +
 deploy polish moved to Phase 4 (blocked on university VM / OAuth creds / Docker
 anyway). Google/GitHub OAuth app credentials are NOT yet created — dev uses the
 password fallback below.
@@ -63,7 +66,8 @@ password fallback below.
   + React Query + Tailwind. KaTeX rendering. `/import` (editor-gated) is the
   scan-then-select import page; PDFs take a scout-first sub-step (Scout free →
   `ScoutSelect` checklist with page-count + cost preview → Extract selected),
-  and its select step calls the ordinary editor CRUD
+  and its select step (editable candidate title + a two-pane **body editor with
+  a live KaTeX preview**, `LivePreview`) calls the ordinary editor CRUD
   (macro set → definition → formulation → draft revision), no import-specific
   write endpoint exists.
 - `spike/` — Phase 0 rendering spike (real LaTeX + cryptocode → SVG). Verdict: passed.
